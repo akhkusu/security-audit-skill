@@ -1,59 +1,59 @@
 ---
 name: security-audit
-description: Security guidance and vulnerability review for codebases, APIs, services, CLI tools, libraries, and daemons. Use for security questions, focused reviews, vulnerability research, security audits, or pen tests. Run the complete workflow only for explicit codebase audit or pen-test requests, full/comprehensive/end-to-end reviews, or requested report artifacts.
+description: コードベース、API、サービス、CLI、ライブラリ、デーモンのセキュリティ相談・脆弱性レビュー。セキュリティの質問、特定範囲のレビュー、脆弱性調査、監査、ペネトレーションテストに使用する。全手順を実行するのは、コードベースの監査・ペネトレーションテスト、完全・包括的・一貫したレビュー、または報告書の出力を明示的に依頼された場合だけ。
 ---
 
-# Security Audit
+# セキュリティ監査
 
-Find vulnerabilities that violate a real trust boundary, then give owners the source evidence, safe reproduction, priority, and smallest effective fix. This is a defensive, source-first workflow. A candidate without a concrete affected principal, resource, or security outcome is not a confirmed finding.
+実際の信頼境界を破る脆弱性を探し、所有者へソース上の証拠、安全な再現、優先度、最小限の有効な修正を提示します。防御目的でソースを第一に調べます。影響を受ける主体・資源・セキュリティ上の結果を具体的に示せない候補は確認済みにしません。
 
-## Operating modes
+## 動作モード
 
-This skill is guidance by default. Loading it does not authorize the complete audit workflow or file creation.
+既定はガイダンスです。このスキルを読み込んだだけでは、全監査やファイル作成を許可されたことにはなりません。
 
-- **Guidance mode**: For security questions, focused reviews, methodology, triage, or investigation of specific findings, use only the relevant parts of this skill. Do not automatically run all six phases, create an output directory, or write audit artifacts. You may launch focused agents when useful; they return results to the current task.
-- **Full audit mode**: Use the complete workflow when the user explicitly asks to audit or pen-test a codebase, asks for a full, comprehensive, or end-to-end security review, or requests report artifacts. Run all six phases and write the files defined below.
+- **ガイダンスモード**：質問、特定範囲のレビュー、方法論、トリアージ、個別の指摘調査では関係箇所だけを使います。6段階の自動実行、出力ディレクトリ作成、監査成果物の出力は行いません。必要なら担当を限定したエージェントを起動し、現在のタスクへ結果を返せます。
+- **完全監査モード**：コードベース監査・ペネトレーションテスト、完全・包括的・一貫したセキュリティレビュー、または報告書を明示的に依頼された場合に使います。6段階すべてを行い、以下のファイルを出力します。
 
-If the request could mean either mode, ask one focused question before creating files or starting the complete workflow.
+両方に解釈できる依頼では、ファイル作成や全手順の開始前に、焦点を絞った質問を1つします。
 
-## Platform terminology
+## プラットフォームの用語
 
-This skill is agent-neutral:
+特定エージェント製品に依存しない用語を使います。
 
-- **Parent** is the agent that coordinates the run and owns shared state.
-- **Task tool** is the platform's delegation or sub-agent mechanism.
-- **`research` agent** is a delegated agent for focused source exploration and factual verification.
-- **`general` agent** is a delegated agent for broad investigation and bounded local execution.
-- **`subagent_type:`** in a heading names which of these two delegated agent roles runs that work.
+- **親（Parent）**：進行を調整し、共有状態を所有するエージェント。
+- **Task tool**：プラットフォームの委譲・サブエージェント機構。
+- **`research` 担当**：範囲を絞ったソース探索・事実確認を委譲する役割。
+- **`general` 担当**：広い調査・範囲を制限したローカル実行を委譲する役割。
+- **`subagent_type:`**：見出し内で、上のどちらの役割を割り当てるか示す指定。
 
-Use equivalent platform capabilities while preserving role, write-isolation, prompt, and independence boundaries.
+同等の機能を使い、役割、書込隔離、プロンプト、独立性の境界を維持します。
 
-## Universal execution safety
+## 全モード共通の実行安全性
 
-These rules apply in both operating modes. Source inspection is read-only. Run target-controlled builds, tests, processes, browsers, emulators, fuzzers, and fixture processing only inside an OS-enforced sandbox that provides all of these controls:
+ソース調査は読み取り専用です。対象が制御する build、test、process、browser、emulator、fuzzer、fixture 処理は、次の全制御を OS が強制するサンドボックス内だけで実行します。
 
-- no external network; use only an isolated loopback namespace when the check needs local client/server traffic;
-- an empty environment populated from an explicit allowlist with safe values, with scratch-local `HOME`, temporary directories, and caches;
-- a read-only target and toolchain, with the target-controlled process able to write only inside its assigned `scratch/` directory; and
-- explicit low CPU, memory, process, file-size, disk, and wall-clock limits.
+- 外部通信禁止。ローカル client/server が必要な検査では隔離 loopback namespace だけを使う。
+- 空の環境から明示的な許可リストの安全な値だけを設定し、`HOME`、一時ディレクトリ、cache は scratch 内にする。
+- 対象と toolchain は読み取り専用とし、対象プロセスは割当 `scratch/` だけへ書ける。
+- CPU、memory、process 数、file size、disk、実時間に明示的な低い上限を設ける。
 
-The agent, outside the target-controlled process, may make a disposable source copy in an assigned `scratch/` directory when a build must write beside source. In guidance mode, do not retain target-controlled files. In full audit mode, only trusted parent-side code may promote the minimum non-secret result to retained `artifacts/` using the procedure under Write isolation. Never expose a retained output directory (other than the agent's own assigned `scratch/`), another agent's directory, the host home directory, credentials, sockets, or shared services to target code. Do not install dependencies or let builds fetch them. Use only tools and dependencies already available locally. If every control cannot be enforced, do not execute target code: report the missing sandbox capability as a needs-validation blocker and give a safe validation plan.
+ソース隣への書込が必要な build では、対象プロセス外のエージェントが割当 scratch 内に使い捨てコピーを作れます。ガイダンスモードでは対象由来ファイルを保持しません。完全監査では、信頼する親側コードだけが、後述の手順で秘密を含まない最小結果を `artifacts/` に保存できます。保持出力先（本人の割当 `scratch/` を除く）、他担当の領域、ホストのホーム、秘密、socket、共有サービスを対象コードに公開しません。依存をインストールしたり build に取得させたりせず、手元のツール・依存だけを使います。全制御を強制できなければ実行せず、不足能力を追加検証の阻害要因として報告し、安全な検証計画を示します。
 
-Use dummy principals, fixtures, and secrets. Do not probe deployed endpoints, external services, shared infrastructure, production identities, other users' data, or live control planes. Do not test availability against a live or shared process, publish artifacts, alter releases, spend paid API quota, or continue beyond the minimum local effect needed to establish a defect. If the decisive fact is outside source or the sandboxed fixture, report it as needing validation.
+ダミー主体、fixture、秘密を使います。配備先、外部サービス、共有基盤、本番 ID、他人のデータ、稼働 control plane を探査しません。共有・稼働プロセスの可用性検証、成果物公開、release 変更、有料 API 費用の消費、欠陥を示す最小効果を越えた継続は禁止です。決定的事実がソース・隔離 fixture の外なら追加検証にします。
 
-## Full audit setup
+## 完全監査の初期設定
 
-In full audit mode, resolve these values before reconnaissance:
+事前調査前に次を確定します。
 
-- **Skill directory**: the absolute directory containing this `SKILL.md`.
-- **Target**: the absolute repository root under review.
-- **Repo name**: a stable repository identifier from the directory or local Git remote.
-- **Output directory**: a new writable directory outside the target, defaulting to `~/security-audit-skill/<repo-name>/run-<N>`, where `<N>` is the next unused integer. Use a directory inside the target only when the user explicitly selects it and the parent verifies that version control ignores the whole directory. Otherwise stop and request an external path.
-- **Source ref**: the reviewed commit and whether the worktree is dirty. Do not treat unreviewed generated or modified files as another revision.
+- **スキルディレクトリ**：この `SKILL.md` を含む絶対パス。
+- **対象（Target）**：レビューする repository root の絶対パス。
+- **リポジトリ名**：ディレクトリまたはローカル Git remote 由来の安定 ID。
+- **出力先**：対象外の新しい書込可能ディレクトリ。既定は `~/security-audit-skill/<repo-name>/run-<N>`。`N` は次の未使用整数。対象内はユーザーが明示的に選び、全体がバージョン管理で無視されることを親が確認した場合だけ。それ以外は停止して外部パスを求めます。
+- **source ref**：レビュー commit と作業ツリーの変更有無。未レビューの生成・変更ファイルを別 revision と扱いません。
 
-### Write isolation
+### 書き込みの隔離
 
-The parent creates and is the only writer of shared run files:
+親だけが共有ファイルを作成・更新します。
 
 - `run-metadata.json`
 - `architecture.md`
@@ -63,130 +63,130 @@ The parent creates and is the only writer of shared run files:
 - `FINDINGS-DETAIL.md`
 - `NEEDS-VALIDATION.md`
 
-Each hunter or verifier receives a unique root under `<output-dir>/agents/<agent-id>/`, with separate `scratch/` and `artifacts/` directories. Canonical agent IDs match `^[a-z0-9][a-z0-9_-]{0,63}$` and must not equal a Windows device name such as `con`, `prn`, `aux`, `nul`, `com1` through `com9`, or `lpt1` through `lpt9`. Lowercase IDs prevent case-fold collisions. The agent and every target-controlled process may write only to `scratch/`; retained `artifacts/` is parent-owned, is never exposed to the sandbox, and is writable only by trusted parent-side promotion code. Agents may not change shared files, target source, retained artifacts, or another agent's directory. Do not use `/tmp` or the host home directory as a writable fallback.
+探索・検証担当には `<output-dir>/agents/<agent-id>/` の一意な領域と、別々の `scratch/`・`artifacts/` を割り当てます。ID は `^[a-z0-9][a-z0-9_-]{0,63}$` とし、`con`、`prn`、`aux`、`nul`、`com1`〜`com9`、`lpt1`〜`lpt9` など Windows device 名は禁止です。小文字で大文字小文字の衝突を防ぎます。担当と対象プロセスが書けるのは scratch だけ。artifacts は親所有で sandbox に見せず、信頼する親側の昇格コードだけが書きます。共有、対象ソース、保持成果物、他担当領域の変更は禁止です。`/tmp` やホストのホームを代替書込先にしません。
 
-Before execution, the parent opens and retains trusted, non-inheritable directory descriptors for the agent's `scratch/` and `artifacts/` roots, and records an allowlist of expected scratch-relative artifact files plus explicit per-file and cumulative byte limits. Never pass those descriptors to the agent or sandbox. After the sandbox and all its processes terminate, trusted parent-side code promotes each allowlisted file separately:
+実行前に、親が信頼できる継承不可の scratch・artifacts root directory descriptor を開いて保持し、許可する scratch 相対ファイルと個別・合計バイト上限を記録します。descriptor を担当・sandbox に渡しません。sandbox と全子プロセスの終了後、信頼する親側コードが許可ファイルを1つずつ昇格します。
 
-1. Validate the declared relative path: reject absolute, empty, `.`, `..`, or symlinked components.
-2. Walk each parent component from the retained scratch-root descriptor with no-follow directory-relative operations; never reopen by path.
-3. Open the leaf no-follow and nonblocking.
-4. Verify with `fstat` that it is a regular file with link count exactly one and within the recorded per-file and cumulative byte limits.
-5. Enforce those limits again while reading from that descriptor.
-6. Copy exactly the verified size, repeat `fstat`, and reject a changed identity, type, link count, or size.
-7. For the destination, walk every parent component from the retained artifacts-root descriptor with no-follow directory-relative operations; require each existing component to be a real directory, and create any missing directory exclusively before reopening and verifying it no-follow.
-8. Create the leaf exclusively without following links, verify that the opened destination is a regular file with link count exactly one, and copy from the verified source descriptor without reopening either path.
-9. Use equivalent race-safe APIs on non-POSIX systems.
-10. Never recursively copy or glob scratch, extract an archive into artifacts, or open or promote a symlink, FIFO, socket, device, directory, hard-linked file, changing file, or file that exceeds its bound.
-11. If any check is unavailable, cannot be enforced, or fails, discard the scratch entry; if it is decisive evidence, retain `needs_validation` with the exact promotion blocker.
+1. 宣言相対パスを検査し、絶対、空、`.`、`..`、symlink の成分を拒否する。
+2. 保持した scratch-root descriptor から各親を no-follow の directory-relative 操作で走査し、パスで開き直さない。
+3. 末端を no-follow・非 blocking で開く。
+4. `fstat` で通常ファイル、link count が厳密に1、個別・合計上限以内であることを確認する。
+5. descriptor から読む間も上限を再度強制する。
+6. 検証サイズだけをコピーし、再 `fstat` で ID、型、link count、サイズの変化を拒否する。
+7. 宛先も保持した artifacts-root descriptor から全親を no-follow で走査する。既存成分は実 directory とし、不足分は排他的に作成して no-follow で開き直し検証する。
+8. 末端は link を追わず排他的に作成し、通常ファイルかつ link count 1 を検証する。どちらのパスも開き直さず、検証した元 descriptor からコピーする。
+9. 非 POSIX では同等の競合安全な API を使う。
+10. scratch の再帰コピー・glob、artifacts 内への archive 展開、symlink、FIFO、socket、device、directory、hard link、変化中・上限超過ファイルの開封・昇格は禁止。
+11. 検査がない・強制不能・失敗なら scratch 項目を捨てる。決定的証拠なら正確な昇格阻害要因と共に `needs_validation` を維持する。
 
-[HUNTING.md](HUNTING.md) and [VALIDATION-AND-REPORTING.md](VALIDATION-AND-REPORTING.md) carry this procedure as one identical fenced block for hunter and verifier prompts; it states the same rules in the same order as this list.
+[HUNTING.md](HUNTING.md) と [VALIDATION-AND-REPORTING.md](VALIDATION-AND-REPORTING.md) には、この規則を同じ順序で記載した同一の fenced block を収録しています。
 
-For a reproduced check, record the command, exact test input, sandbox limits, and only the allowlisted environment variable names plus safe non-secret values needed to reproduce it. Never capture or copy the ambient environment, inherited variables, credential values, authentication state, or unrelated host paths. Launch from an empty environment rather than trying to redact one after execution.
+再現ではコマンド、正確な入力、sandbox 制限、必要な許可変数名と安全な非秘密値だけを記録します。ホスト全体の環境、継承変数、資格、認証状態、無関係なホストパスを取得・コピーしません。実行後の秘匿処理ではなく、空の環境から起動します。
 
-Before delegation, the parent writes `run-metadata.json` with at least `run_id`, `repo`, `target`, `source_ref`, `profile`, `scope_paths`, `budget` (null if unset), `execution_policy: "sandboxed-source-and-local-only"`, selected companion files, prior-run paths, shared-file owners, and `run_status: "in_progress"`. Update metadata only when those facts change; candidate state belongs in the coverage ledger and `findings.json`.
+委譲前に `run-metadata.json` へ最低限 `run_id`、`repo`、`target`、`source_ref`、`profile`、`scope_paths`、`budget`（未指定は null）、`execution_policy: "sandboxed-source-and-local-only"`、選択した補足ファイル、過去の結果パス、共有ファイル所有者、`run_status: "in_progress"` を記録します。これらの事実が変わった時だけ更新し、候補状態は台帳と findings に記録します。
 
-## Full audit planning
+## 完全監査の計画
 
-The coverage, prior-run, profile, and budget requirements in this section apply only in full audit mode.
+以下の範囲、過去結果、profile、予算の規則は完全監査だけに適用します。
 
-### Coverage and prior runs
+### 調査範囲・過去の結果
 
-No one pass is complete. Build a deterministic coverage plan before hunting and update it after every agent result. [RECONNAISSANCE.md](RECONNAISSANCE.md) defines the stable coverage units and [HUNTING.md](HUNTING.md) defines coverage-critic waves. The parent alone updates the ledger.
+1回で完了とは考えません。探索前に決定的な調査計画を作り、担当の結果ごとに更新します。[RECONNAISSANCE.md](RECONNAISSANCE.md) が安定した単位を、[HUNTING.md](HUNTING.md) が網羅性レビューの反復を定義します。台帳更新は親だけです。
 
-If prior runs exist, read every compatible `coverage-ledger.json` and `findings.json` before planning the current run:
+過去結果があれば、計画前に互換な台帳と findings をすべて読みます。
 
-1. Compare the relevant current source with each prior record and unit. A prior source ref alone is not evidence that a path is unchanged.
-2. Carry a prior `confirmed` record into the current candidate set only when its relevant source and conditions are unchanged and its evidence still meets the current contract. Link it to a current ledger unit seeded `planned`, preserve its fingerprint, exclude only that carried root cause from hunters, and send the carried record through the current final verification path; the Phase 3 verifier that re-checks it becomes that unit's assignment owner and moves it to `candidate`.
-3. When relevant source for a prior `confirmed` record changed, create a current planned revalidation unit. Do not put that record on the hunter exclusion list. It remains confirmed only if current independent validation establishes the current path and result.
-4. Make prior `needs_validation`, `deferred`, `blocked`, `out_of_scope`, and any changed-source unit current work. A still-external `needs_validation` record may be carried only after the current source trace is checked and linked by fingerprint to a current `planned` unit whose verifier re-check supplies its owner and evidence; the record keeps the unresolved blocker. These prior states never suppress a current unit.
-5. A prior same-source covered unit may inform priority, but it remains visible in the current ledger. A prior `rejected` record suppresses only the unchanged failed claim, not coverage of its unit; changed evidence creates current work.
-6. Read the prior profile and scope. A prior `quick` or scoped ledger contributes only its recorded evidence and gaps, never an implied "rest is fine."
+1. 各過去記録・単位を現ソースと比較します。source ref だけでは未変更の証拠になりません。
+2. 関連ソース・条件が同一で現契約を満たす過去 `confirmed` だけ今回の候補へ引き継ぎます。今回の `planned` 単位へ結び、fingerprint を保持し、その根本原因だけ探索除外にして現行の最終検証へ送ります。第3段階の再検証担当が所有者となり `candidate` へ移します。
+3. 関連ソースが変われば `planned` の再検証単位を作り、探索除外にしません。現在の独立検証が経路と結果を確認するまで確認済みを維持しません。
+4. 過去の `needs_validation`、`deferred`、`blocked`、`out_of_scope`、変更済み単位を今回の作業にします。外部阻害が残る needs_validation は、現経路を確認し、fingerprint で今回の planned 単位へ結び、検証担当の再確認で所有者と証拠を与える場合だけ引き継げます。未解決阻害は残し、これらの状態で現在の単位を除外しません。
+5. 同一ソースの調査済みは優先度の参考にできますが台帳に残します。過去 rejected は同じ未変更の失敗主張だけを除外し、単位の調査は除外しません。証拠が変われば新しい作業です。
+6. 過去 profile・scope を読みます。quick・部分台帳は記録された証拠と不足だけを引き継ぎ、「残りも安全」と推測しません。
 
-If no prior ledger exists, say so in the final coverage statement. Never imply that one run exhausts the target.
+過去台帳がなければ最終の範囲説明で明示し、1回で対象を調べ尽くしたと示唆しません。
 
-### Run profiles and scope
+### 実行 profile・対象範囲
 
-During full audit setup, pick a profile from the user's request or propose one from the target's size and stakes. Record it in `run-metadata.json` (`profile`, `scope_paths`) and state it in the report. The default is `standard`.
+完全監査の設定時に、依頼から profile を選ぶか、対象規模と重要度から提案します。`run-metadata.json` の `profile`・`scope_paths` と報告書へ記録します。既定は `standard` です。
 
-- **`quick`** — a bounded pass for small targets, re-runs, or a fast first look. Coarsen ledger units to surface × boundary × attack class (subsystem uses the fixed canonical `profile/quick/all-in-scope-subsystems` identifier), run exactly one hunter wave followed by exactly one final coverage-critic pass, and use one fresh verifier per candidate for both candidate validation and final record verification. Do not launch a follow-up hunter wave: record the critic's accepted discoveries and reassignments as `deferred`.
-- **`standard`** — the workflow as written.
-- **`deep`** — for high-stakes or large targets. Split ledger units per subsystem and lifecycle mode, run critic waves to a clean pass, keep candidate validation and final record verification as separate fresh agents, and give `prior_covered_same_source` units an independent second pass.
+- **`quick`**：小規模、再実行、初見向けの限定調査。入口 × 境界 × 分類に粗くまとめ、subsystem は `profile/quick/all-in-scope-subsystems`。探索 wave を厳密に1回、その後の最終網羅性レビューを厳密に1回行います。各候補は新しい検証担当1人が候補・最終記録の両検証を担当します。追加探索はせず、レビューで受理した発見・再割当は deferred にします。
+- **`standard`**：本書どおりの標準手順。
+- **`deep`**：重要度・規模が高い対象。subsystem と lifecycle ごとに分け、網羅性レビューが問題なしになるまで反復します。候補検証と最終検証は別の新担当とし、`prior_covered_same_source` にも独立した再調査を行います。
 
-A **scoped run** audits a subset: named paths, one subsystem, one companion domain, or the diff between two source refs. Seed ledger units only for in-scope surfaces and record everything else as `out_of_scope` — never as `covered`. A scoped or `quick` run must present itself as partial coverage.
+**部分監査（scoped run）**は、指定パス、subsystem、補足分野、または2つの source ref の差分を調べます。割当は範囲内入口だけとし、他は covered ではなく out_of_scope にします。quick・部分監査は部分的な調査と明示します。
 
-Profiles change breadth and redundancy, never the evidence bar. Do not scale away the candidate gate, the source/local execution boundary, `needs_validation` discipline, schema validation, or independent verification of `confirmed` records.
+profile が変えるのは広さと重複確認であり、証拠の基準ではありません。候補基準、ソース／ローカル境界、needs_validation の区別、schema 検証、confirmed の独立検証は省きません。
 
-#### Cost budget
+#### 費用・呼び出し予算
 
-The ledger makes spend countable: one unit is roughly one hunter assignment, and one surviving candidate is one or two verifier assignments depending on profile. When the user sets a budget — or the parent proposes one for a large target — record `budget` in `run-metadata.json` as a maximum number of agent invocations across all phases.
+1単位はおおむね探索担当1回、残る候補は profile に応じ検証担当1〜2回です。利用者が予算を設定した、または大きな対象で親が提案した場合、全段階の最大 agent 呼出数を metadata の `budget` に記録します。
 
-Apply the strict budget gate before launching any reconnaissance agent. Reserve the four baseline reconnaissance calls, one final post-wave critic for `quick` or one post-wave plus one distinct final-clean critic for `standard`/`deep`, and at least one verifier call. Add focused reconnaissance only after repeating this gate for each extra call. If the requested budget cannot fund that minimum, launch no agent: ask for a larger budget, narrower scope, or different profile. If the request remains unchanged, set `run_status: "incomplete"` with `incomplete_reason: "budget_cannot_fund_reconnaissance_and_reserves"` and report that no audit pass ran.
+事前調査の起動前に厳密な予算判定を行います。基本の事前調査4回、quick なら最終を兼ねる wave 後レビュー1回、standard/deep なら wave 後と別の最終問題なしレビュー、さらに最低1回の検証を予約します。追加調査ごとに判定を繰り返します。最低限を賄えなければ起動せず、予算増、範囲縮小、profile 変更を求めます。依頼が変わらなければ `run_status: "incomplete"`、`incomplete_reason: "budget_cannot_fund_reconnaissance_and_reserves"` を記録し、監査未実施を報告します。
 
-Spend it in this order:
+予算は次の順で使います。
 
-1. Count reconnaissance, every post-wave critic, and the separate final-clean critic as agent invocations.
-2. **Reserve critics and validation before hunting.** For `quick`, reserve its one post-wave final critic. Before every `standard` or `deep` hunter wave, reserve one immediate post-wave critic plus one distinct final-clean critic. Also reserve verifier cost from the profile (about 1 or 2 agents per expected candidate; when in doubt reserve 30% of the balance after critic reservation). Never assign hunters into either reserve.
-3. Assign hunters to units in priority order until the hunting allowance is spent. Spend the reserved post-wave critic immediately after that wave; keep the final-clean and validation reserves intact.
-4. Before a later wave, reserve its new post-wave critic again. If the remaining budget cannot cover the required critic calls and validation reserve, launch no hunters from that wave, mark its planned units `deferred` with reason `budget_cannot_reserve_critics_and_validation`, and use the retained final-clean critic to record the resulting gap.
+1. 事前調査、各 wave 後レビュー、独立した最終問題なしレビューをすべて計数する。
+2. **探索より先にレビュー・検証を確保する。** quick は唯一の最終レビュー、standard/deep は各 wave 前に直後のレビューと別の最終レビューを確保する。検証は候補あたり約1〜2回、迷えばレビュー予約後残額の30%を確保し、探索で使わない。
+3. 優先順で探索へ割り当て、直後レビュー予約をその wave 後すぐ使い、最終・検証分を保持する。
+4. 次 wave も直後レビュー分を再確保する。最低予約を満たせなければ探索を起動せず、planned を `deferred`、理由 `budget_cannot_reserve_critics_and_validation` にし、残した最終レビューで不足を記録する。
 
-Before wave 1, update the pre-recon estimate with seeded units, implied hunter count, mandatory critic calls, validation reserve, and whether the remaining budget covers the plan. If it clearly cannot, say so and propose either a tighter scope or a coarser profile instead of silently thinning evidence. If later facts consume the required final-critic reserve, launch no hunters, mark all planned work deferred, set the run incomplete with reason `critic_budget_exhausted`, and make no complete-coverage claim.
+wave 1 前に、単位数、探索数、必須レビュー、検証予約、残予算で賄えるかを更新します。明らかに不足なら黙って証拠を薄くせず、狭い範囲か粗い profile を提案します。途中で最終レビュー予約が失われたら探索を止め、planned をすべて deferred にし、理由 `critic_budget_exhausted` の未完了として網羅完了を主張しません。
 
-A strict total-agent budget can still be exceeded by an unexpectedly large candidate set or by a material Phase 5 replacement that needs another independent verifier. If the remaining budget cannot validate every candidate, stop hunting, validate candidates in fingerprint order while the budget permits, and set `run_status: "incomplete"` plus `incomplete_reason: "validation_budget_exhausted"`. Keep each unvalidated fingerprint linked to a `candidate` ledger unit with that unresolved reason. Do not put an unvalidated candidate in `findings.json`, relabel it `needs_validation`, or report the run as complete. Phase 6 may produce a partial report only if its first section states that candidate validation is incomplete and lists the affected fingerprints and units. Never exceed a user-set strict budget silently.
+予想外の候補数や第5段階の重要な置換で予算が不足することがあります。全候補を検証できなければ探索を停止し、fingerprint 順に予算内で検証し、`incomplete_reason: "validation_budget_exhausted"` にします。未検証 fingerprint は同じ理由で candidate 単位へ結び付けたままにし、findings に入れたり needs_validation に付け替えたり完了扱いにしません。第6段階の部分報告は冒頭で検証未完了と該当 fingerprint・単位を列挙する場合だけ作れます。利用者の厳密な予算を黙って越えません。
 
-## Core principles
+## 基本原則
 
-### Require a boundary and result
+### 境界と結果を必要とする
 
-For every candidate, name the lower-trust principal, accepted input or action, intended control, crossed boundary, affected principal or resource, and concrete observed or owner-observable result. Do not elevate a missing best practice, guessed deployment behavior, generic parser crash, or self-impact into a security finding.
+各候補で、低信頼主体、受理入力・操作、意図した制御、越えた境界、影響主体・資源、観測結果または所有者が観測できる具体的結果を示します。best practice 不足、推測の配備挙動、一般的な parser crash、自己影響を指摘へ格上げしません。
 
-### Use bounded local evidence
+### 範囲を制限したローカル証拠を使う
 
-Static analysis establishes the source path. Sandboxed local tests resolve behavior when all execution controls are available: a minimal function harness, existing unit test, small parser fixture, dummy-tenant integration test, locally rendered configuration, or bounded isolated-loopback client. Stop at a wrong return value, unauthorized dummy record, sanitizer finding, policy difference, or other minimum effect. Do not extend the local check beyond the minimum boundary result or produce persistence, post-fault, or concealment material.
+静的解析でソース経路を確立します。全実行制御が揃う場合だけ、最小関数ハーネス、既存 unit test、小 parser fixture、ダミーテナント統合 test、生成設定、隔離 loopback client で挙動を解決します。誤返り値、未許可のダミー記録、sanitizer 検出、policy 差などの最小効果で止め、永続化、障害後の操作、隠蔽へ広げません。
 
-### Respect source visibility
+### ソースから見える範囲を守る
 
-Deployment controls, proxy behavior, provider settings, browser headers, identity policy, broker ACLs, packaging, and topology are real controls. If they are required and absent from the repository, do not assume either presence or absence. Use `needs_validation` with the exact missing fact and a safe owner-observed or local plan.
+配備制御、proxy、provider 設定、browser header、identity policy、broker ACL、packaging、topology は実際の防御です。必要でも repo に見えなければ、有無どちらも仮定しません。正確な不明点と、安全な所有者観測・ローカル計画付きの needs_validation にします。
 
-### Separate priority from certainty
+### 優先度と確実性を分ける
 
-Only `confirmed` records receive severity. Likelihood and impact must reflect the demonstrated conditions and result; overall severity cannot exceed demonstrated impact. `needs_validation` means a specific source-grounded boundary hypothesis is blocked, not a low-confidence confirmed vulnerability, and it has no severity.
+深刻度を付けるのは confirmed だけです。可能性・影響は実証条件と結果を反映し、総合深刻度は実証影響を越えません。needs_validation はソース根拠のある境界仮説の検証が阻害されている状態で、低確信の確認済み脆弱性ではなく、深刻度も持ちません。
 
-Calibrate overall severity with these anchors:
+総合深刻度の目安：
 
-- **critical** — an unauthenticated actor gains code execution, full data-store access, or takeover of arbitrary accounts.
-- **high** — an actor fully defeats an explicit security control with real consequences: authentication bypass, cross-tenant read or write, stored script execution affecting other users, authenticated code execution, or an unauthenticated remote stop of a shared service.
-- **medium** — a real boundary violation with limited blast radius, uncommon preconditions, or consequences confined to a narrow resource set.
-- **low** — disclosure of non-secret internals, or an effect requiring sustained effort for minimal gain.
-- **informational** — a confirmed but minimal-impact observation, useful mainly as a prerequisite inside a larger finding.
+- **critical**：未認証主体がコード実行、データ保存全体へのアクセス、任意アカウント乗っ取りを得る。
+- **high**：認証回避、テナント間の読書き、他人への保存型スクリプト実行、認証済みコード実行、未認証による共有サービス遠隔停止など、明示的な制御を完全に破り実害を生む。
+- **medium**：実際の越境だが影響範囲が狭い、前提が珍しい、限定資源だけに影響する。
+- **low**：秘密でない内部情報の開示、または継続的な労力に対し利得がごく小さい。
+- **informational**：確認済みだが影響は最小で、主に大きな指摘の前提として役立つ観測。
 
-The high/medium discriminator: does the demonstrated result fully defeat an explicit control for an action with real consequences, or only weaken it? If you cannot state the concrete damage, the severity is lower than it feels.
+high と medium は、実害のある操作で明示的制御を完全に破ったか、弱めただけかで分けます。具体的な損害を言えなければ、印象より深刻度を下げます。
 
-### Recommend the smallest effective source fix
+### 最小限の有効なソース修正を提案する
 
-For each confirmed finding, identify the invariant the code must enforce and the narrowest source change that enforces it at the last trusted decision point. Prefer specific repository-relative changes and regression tests over generic hardening advice. The audit describes fixes; it does not modify target source.
+各 confirmed について必要な不変条件と、最後の信頼できる判断点でそれを強制する最小変更を示します。一般的な強化策より、repo 相対の具体的変更と回帰 test を優先します。監査は修正を説明し、対象ソースを変更しません。
 
-## Full audit workflow
+## 完全監査の手順
 
-In full audit mode, follow all six phases in order:
+6段階を順に実行します。
 
-1. **Reconnaissance** — map the source, trust boundaries, local build paths, companion selections, prior evidence, and initial deterministic coverage ledger with [RECONNAISSANCE.md](RECONNAISSANCE.md).
-2. **Coverage-led hunting waves** — assign isolated hunters from the ledger and collect structured candidate results with [HUNTING.md](HUNTING.md), [ATTACK-CLASSES.md](ATTACK-CLASSES.md), and the selected domain companions.
-3. **Candidate validation** — consolidate fingerprints and give every candidate to a fresh source verifier as defined in [VALIDATION-AND-REPORTING.md](VALIDATION-AND-REPORTING.md).
-4. **Structured output** — write all final `confirmed`, `needs_validation`, and `rejected` records to `findings.json`; validate it with `report-schema.json` and `validate-findings.cjs`, and validate the coverage claim with `validate-coverage-ledger.cjs`.
-5. **Independent record verification** — use fresh agents to verify final source claims and reconcile corrections or state changes.
-6. **Target-neutral report** — derive `REPORT.md`, `FINDINGS-DETAIL.md`, and `NEEDS-VALIDATION.md` from the final records, with no live-probe instructions.
+1. **事前調査**：ソース、境界、ローカル build、補足ガイド、過去証拠、初期台帳を [RECONNAISSANCE.md](RECONNAISSANCE.md) で整理。
+2. **台帳に基づく探索 wave**：[HUNTING.md](HUNTING.md)、[ATTACK-CLASSES.md](ATTACK-CLASSES.md)、選択ガイドで独立した探索担当を割当て、構造化候補を収集。
+3. **候補検証**：fingerprint を統合し、[VALIDATION-AND-REPORTING.md](VALIDATION-AND-REPORTING.md) に従い各候補を新しい担当へ渡す。
+4. **構造化出力**：最終の confirmed、needs_validation、rejected を findings に書き、schema・`validate-findings.cjs`、台帳を `validate-coverage-ledger.cjs` で検証。
+5. **記録の独立検証**：新担当が最終のソース上の主張を確認し、訂正・状態変更を整合させる。
+6. **対象環境に依存しない報告**：最終記録から3つの報告 Markdown を作成し、稼働先を探査する指示を入れない。
 
-Do not end the run before one of exactly two terminal states: (a) all Phase 6 artifacts are written and both validators pass, or (b) `run_status: "incomplete"` is recorded with its exact reason and the gap is disclosed in the report. Never stop mid-phase.
+終了は、(a) 第6段階の全成果物を書き両検証に合格、または (b) `run_status: "incomplete"` と正確な理由を記録し報告で不足を開示、の2状態だけです。段階途中で終了しません。
 
-## Anti-patterns
+## 避けるべき監査方法
 
-1. Checklist deviations presented as vulnerabilities.
-2. Defense-in-depth advice with no reachable boundary violation.
-3. Live or shared-environment testing where bounded local evidence is insufficient.
-4. Guessing provider, proxy, browser, identity, or deployment behavior not present in source.
-5. Treating intended same-principal authority or self-impact as a cross-boundary result.
-6. Reporting a parser or runtime effect stronger than the observed effect.
-7. Emitting prose-only hunter results that cannot be deduplicated or verified.
-8. Re-reporting carried same-source prior confirmed records or using them as exemplars that anchor the hunt.
-9. Assigning severity to `needs_validation` records.
-10. Writing the report before independent verification or letting prose and JSON disagree.
+1. チェックリストからの逸脱を脆弱性とする。
+2. 到達可能な越境なしに多層防御の提案を指摘とする。
+3. 限定したローカル証拠で足りないために稼働・共有環境を試す。
+4. ソースにない provider、proxy、browser、ID、配備挙動を推測する。
+5. 意図した同一主体の権限・自己影響を越境結果とする。
+6. parser・runtime の観測以上の影響を報告する。
+7. 重複排除・検証できない文章だけの探索結果を返す。
+8. 同一ソースの引継ぎ済み confirmed を再発見として報告したり、探索を誘導する手本にする。
+9. needs_validation に深刻度を付ける。
+10. 独立検証前に報告を書いたり、文章と JSON を食い違わせる。

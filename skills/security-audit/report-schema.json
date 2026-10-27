@@ -5,7 +5,7 @@
     "oneOf": [
       {
         "type": "object",
-        "description": "A source-grounded vulnerability that was independently demonstrated.",
+        "description": "ソースコードに根拠があり、独立した検証で実証された脆弱性。",
         "properties": {
           "verdict": {
             "type": "string",
@@ -15,7 +15,7 @@
             "type": "string",
             "minLength": 1,
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+-]*$",
-            "description": "A stable source-derived identifier that does not change between validation states."
+            "description": "ソースコードに由来する安定した識別子。検証状態が変わっても変更しない。"
           },
           "title": {
             "type": "string",
@@ -118,7 +118,7 @@
           },
           "execution": {
             "type": "object",
-            "description": "Target-neutral reproduction in the target's native interface.",
+            "description": "対象の標準インターフェースを使い、特定の稼働環境に依存しない再現手順。",
             "properties": {
               "attacker_perspective": {
                 "type": "string",
@@ -245,7 +245,7 @@
       },
       {
         "type": "object",
-        "description": "A source-grounded candidate whose decisive validation is blocked.",
+        "description": "ソースコードに根拠はあるが、決定的な検証が阻害されている候補。",
         "properties": {
           "verdict": {
             "type": "string",
@@ -362,7 +362,7 @@
       },
       {
         "type": "object",
-        "description": "A source-grounded candidate refuted during validation.",
+        "description": "ソースコードに根拠のある候補のうち、検証中に反証されたもの。",
         "properties": {
           "verdict": {
             "type": "string",

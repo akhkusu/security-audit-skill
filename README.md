@@ -1,61 +1,62 @@
 # security-audit
 
-A coding-agent skill that turns your agent into a security auditor. It orchestrates isolated agents through reconnaissance, coverage-led hunting, candidate validation, structured output, independent record verification, and target-neutral reporting.
+コーディングエージェントをセキュリティ監査役として使うためのスキルです。独立したエージェントを使い、事前調査、調査範囲に基づく脆弱性探索、候補の検証、構造化データの出力、記録の独立検証、対象環境への接続を必要としない報告までを進めます。
 
-This is the skill that seeded Cloudflare's vulnerability discovery harness, described in [Build your own vulnerability harness](https://blog.cloudflare.com/build-your-own-vulnerability-harness). The harness grew into a multi-stage, fleet-wide system; this skill is the single-repo starting point it evolved from.
+このスキルは、Cloudflare の脆弱性発見ハーネスの出発点となりました。背景は [Build your own vulnerability harness](https://blog.cloudflare.com/build-your-own-vulnerability-harness) を参照してください。ハーネスは多数のリポジトリを扱う多段階のシステムへ発展しましたが、本スキルはその原型である単一リポジトリ向けの仕組みです。
 
-## What it does
+## できること
 
-The skill runs a structured audit in six phases:
+監査は次の6段階で進みます。
 
-1. **Reconnaissance** -- map architecture, trust boundaries, input surfaces, prior evidence, and deterministic coverage in `architecture.md` and `coverage-ledger.json`.
-2. **Coverage-led hunting** -- assign isolated hunters from ledger units, record their checks, and use coverage critics to find gaps.
-3. **Candidate validation** -- give every unique candidate to a fresh verifier that tries to disprove it.
-4. **Structured output** -- write `confirmed`, `needs_validation`, and `rejected` records to `findings.json` and validate them against `report-schema.json`.
-5. **Independent record verification** -- fresh agents verify final source claims. Material replacements receive another independent verifier.
-6. **Target-neutral reporting** -- derive `REPORT.md`, `FINDINGS-DETAIL.md`, and `NEEDS-VALIDATION.md` from the verified records and coverage ledger.
+1. **事前調査** — アーキテクチャ、信頼境界、入力経路、過去の証拠、再現可能な調査範囲を `architecture.md` と `coverage-ledger.json` に整理します。
+2. **調査範囲に基づく探索** — 台帳の調査単位を独立した探索担当へ割り当て、確認内容を記録します。網羅性レビュー担当が見落としを探します。
+3. **候補の検証** — 重複を除いた各候補を新しい検証担当に渡し、反証を試みます。
+4. **構造化データの出力** — `confirmed`、`needs_validation`、`rejected` の記録を `findings.json` に出力し、`report-schema.json` に照らして検証します。
+5. **記録の独立検証** — 新しいエージェントが最終的なソースコード上の主張を検証します。重要な修正で記録を置き換えた場合は、別の独立した検証担当が再確認します。
+6. **対象環境に依存しない報告** — 検証済みの記録と調査台帳から `REPORT.md`、`FINDINGS-DETAIL.md`、`NEEDS-VALIDATION.md` を作成します。
 
-The parent runs `validate-coverage-ledger.cjs` after creating the ledger and after each later ledger update. It runs `validate-findings.cjs` in Phase 4 and again after every Phase 5 replacement.
+親エージェントは、台帳の作成時と以後の更新ごとに `validate-coverage-ledger.cjs` を実行します。第4段階と、第5段階で記録を置き換えるたびに `validate-findings.cjs` を実行します。
 
-The verdicts are distinct: `confirmed` has a complete source trace and bounded observed result, `needs_validation` has an exact unresolved fact and no severity, and `rejected` records a disproved candidate.
+判定は明確に分けます。`confirmed`（確認済み）はソース上の経路と範囲を制限した観測結果が揃ったもの、`needs_validation`（追加検証が必要）は未確認の事実が特定されているもので深刻度は付けません。`rejected`（棄却）は反証された候補です。
 
-Multiple runs against the same repo are additive. The skill uses prior ledgers and findings to target gaps, revalidate changed source, and carry forward current-source evidence without treating stale or unresolved work as covered.
+同じリポジトリで監査を繰り返すと、過去の結果を積み重ねられます。台帳と指摘を使って未調査箇所を優先し、変更されたソースを再検証し、現在のソースでも有効な証拠を引き継ぎます。古い証拠や未解決の作業を「調査済み」とは扱いません。
 
-## Files
+## ファイル一覧
 
-| File | Purpose |
-|------|---------|
-| `SKILL.md` | Setup, core principles, platform terminology, workflow overview, and audit anti-patterns |
-| `RECONNAISSANCE.md` | Phase 1 reconnaissance prompts and synthesis instructions |
-| `HUNTING.md` | Phase 2 orchestration, hunting methodology, and validation rules |
-| `ATTACK-CLASSES.md` | Core, wildcard, and obvious-things attack prompts |
-| `MEMORY-SAFETY-AND-BINARY.md` | Memory-safety, binary, and kernel hunting classes for native targets |
-| `AI-AND-LLM.md` | Prompt-injection, agent/tool, and output-handling hunting classes for LLM-backed targets |
-| `WEB-PROTOCOL-AND-AUTH.md` | HTTP request-framing, cache, and authentication-protocol hunting classes for HTTP-protocol and auth targets |
-| `CLIENT-SIDE.md` | DOM-injection, messaging-trust, UI-redress, and prototype-pollution hunting classes for client-side/browser targets |
-| `SUPPLY-CHAIN-AND-RELEASE.md` | Dependency, CI, release, signing, update, plugin, and extension hunting classes |
-| `CLOUD-AND-DEPLOYMENT.md` | IAM, infrastructure-as-code, container, serverless, ingress, and runtime-configuration hunting classes |
-| `PROTOCOLS-RPC-AND-MESSAGING.md` | RPC, serialization, queue, broker, webhook, and streaming-protocol hunting classes |
-| `RESOURCE-EXHAUSTION-AND-AVAILABILITY.md` | Shared resource, quota, queue, worker, and operator-spend hunting classes |
-| `DATA-ISOLATION-AND-LIFECYCLE.md` | Tenant isolation, cache, search, export, backup, migration, deletion, and restore hunting classes |
-| `DESKTOP-MOBILE-AND-LOCAL-IPC.md` | Native app, deep-link, webview, exported-component, helper, daemon, and local-IPC hunting classes |
-| `VALIDATION-AND-REPORTING.md` | Phases 3–6 candidate validation, structured output, record verification, and reporting |
-| `report-schema.json` | JSON schema for all three `findings.json` verdicts |
-| `validate-findings.cjs` | Zero-dependency validator for `findings.json` in Phases 4 and 5 |
-| `validate-findings.test.cjs` | Findings-validator tests and producer-compatible fixture checks |
-| `validate-coverage-ledger.cjs` | Zero-dependency validator for `coverage-ledger.json` in Phases 1–5 |
-| `validate-coverage-ledger.test.cjs` | Coverage-ledger validator tests |
+| ファイル | 役割 |
+|----------|------|
+| `SKILL.md` | 初期設定、基本原則、プラットフォーム用語、全体の手順、避けるべき監査方法 |
+| `RECONNAISSANCE.md` | 第1段階の事前調査プロンプトと結果の統合方法 |
+| `HUNTING.md` | 第2段階の進行管理、探索方法、検証ルール |
+| `ATTACK-CLASSES.md` | 基本的な攻撃分類、分類外の探索、基本事項の確認プロンプト |
+| `MEMORY-SAFETY-AND-BINARY.md` | ネイティブコードのメモリ安全性、バイナリ、カーネルの調査 |
+| `AI-AND-LLM.md` | プロンプトインジェクション、エージェント／ツール、モデル出力の取り扱い |
+| `WEB-PROTOCOL-AND-AUTH.md` | HTTP のリクエスト境界、キャッシュ、認証プロトコル |
+| `CLIENT-SIDE.md` | DOM インジェクション、メッセージの信頼性、UI 偽装、プロトタイプ汚染 |
+| `SUPPLY-CHAIN-AND-RELEASE.md` | 依存関係、CI、リリース、署名、更新、プラグイン、拡張機能 |
+| `CLOUD-AND-DEPLOYMENT.md` | IAM、IaC、コンテナ、サーバーレス、入口経路、実行時設定 |
+| `PROTOCOLS-RPC-AND-MESSAGING.md` | RPC、シリアライズ、キュー、ブローカー、Webhook、ストリーミング |
+| `RESOURCE-EXHAUSTION-AND-AVAILABILITY.md` | 共有資源、クォータ、キュー、ワーカー、運用者の費用負担 |
+| `DATA-ISOLATION-AND-LIFECYCLE.md` | テナント分離、キャッシュ、検索、エクスポート、バックアップ、移行、削除、復元 |
+| `DESKTOP-MOBILE-AND-LOCAL-IPC.md` | ネイティブアプリ、ディープリンク、WebView、公開コンポーネント、ヘルパー、デーモン、ローカル IPC |
+| `VALIDATION-AND-REPORTING.md` | 第3〜6段階の候補検証、構造化出力、記録検証、報告 |
+| `report-schema.json` | `findings.json` の3種類の判定に対応する JSON Schema |
+| `validate-findings.cjs` | 第4・5段階で使う、外部依存のない指摘データ検証ツール |
+| `validate-findings.test.cjs` | 指摘データ検証ツールのテストと、出力側に対応したフィクスチャの検査 |
+| `validate-coverage-ledger.cjs` | 第1〜5段階で使う、外部依存のない調査台帳検証ツール |
+| `validate-coverage-ledger.test.cjs` | 調査台帳検証ツールのテスト |
+| `LICENSE.ja.md` | MIT ライセンスの参考日本語訳。正式な条件は `LICENSE` を参照 |
 
-## Installation
+## インストール
 
-Install the skill with the [Skills CLI](https://skills.sh):
+[Skills CLI](https://skills.sh) でインストールします。
 
 ```bash
 npx skills add https://github.com/cloudflare/security-audit-skill \
   --skill security-audit
 ```
 
-Use `--global` for a user-level installation:
+ユーザー全体で使う場合は `--global` を付けます。
 
 ```bash
 npx skills add https://github.com/cloudflare/security-audit-skill \
@@ -63,44 +64,46 @@ npx skills add https://github.com/cloudflare/security-audit-skill \
   --global
 ```
 
-Run `npx skills --help` for agent-selection and non-interactive options.
+エージェントの選択や非対話実行のオプションは `npx skills --help` で確認できます。
 
-## Usage
+## 使い方
 
-Start your coding agent in (or pointed at) the codebase you want to audit, then ask it to do a security audit:
+監査対象のコードベースでコーディングエージェントを起動するか、そのコードベースを指定して、次のように依頼します。
 
-```
-security audit this codebase
-```
-
-```
-find security vulnerabilities in ./src
+```text
+このコードベースをセキュリティ監査して
 ```
 
+```text
+./src のセキュリティ上の脆弱性を探して
 ```
-do a security review, output to ~/audits/my-project
+
+```text
+セキュリティレビューを行い、結果を ~/audits/my-project に出力して
 ```
 
-The skill activates automatically when the request matches its trigger (security audit, find vulnerabilities, pen-test the code, etc.). A direct codebase audit or pen-test request uses full audit mode. Security questions and focused vulnerability work use guidance mode unless you request report artifacts. In full audit mode, an unspecified output directory defaults to `~/security-audit-skill/<repo-name>/run-<N>`. The workflow writes inside the target repository only when you explicitly select a directory that version control ignores.
+セキュリティ監査、脆弱性の探索、コードのペネトレーションテストなどの依頼に一致すると、スキルが自動的に有効になります。コードベースの監査やペネトレーションテストを直接依頼した場合は完全監査モードを使います。セキュリティに関する質問や特定の脆弱性の調査では、報告書の出力を指定しない限りガイダンスモードを使います。
 
-## Requirements
+完全監査モードで出力先を省略した場合は `~/security-audit-skill/<repo-name>/run-<N>` を使います。対象リポジトリ内へ書き込むのは、バージョン管理で無視されるディレクトリをユーザーが明示的に選んだ場合だけです。
 
-- A coding agent with a model that supports tool use and parallel sub-agents
-- Node.js for the zero-dependency findings and coverage-ledger validators
-- An OS-enforced sandbox for target-controlled builds, tests, processes, browsers, emulators, fuzzers, and fixtures. It must disable external networking, use a sanitized allowlisted environment, enforce resource limits, and allow writes only to assigned scratch paths. Without these controls, the workflow keeps the lead as `needs_validation` instead of executing target code.
+## 必要な環境
 
-## Design principles
+- ツールの利用と並列サブエージェントに対応したモデルを使うコーディングエージェント
+- 指摘データと調査台帳の検証ツールを動かす Node.js。追加パッケージは不要です。
+- 対象側が制御するビルド、テスト、プロセス、ブラウザー、エミュレーター、ファザー、フィクスチャを実行するための、OS が強制するサンドボックス。外部通信を無効にし、許可リストで絞った安全な環境変数、資源制限、割り当てられた一時作業領域だけへの書き込み制限が必要です。これらを満たせなければ対象コードは実行せず、候補を `needs_validation` に留めます。
 
-- **Only confirm established boundary failures.** Keep a source-grounded blocked lead as `needs_validation` with its exact unresolved fact.
-- **Adversarial validation.** The agent that checks a finding is never the agent that found it.
-- **Severity requires impact.** Likelihood x impact, not deviation from a checklist.
-- **Defense-in-depth gaps are not vulnerabilities.** If Layer A prevents the attack, the absence of Layer B is a hardening note.
-- **Multiple runs improve coverage.** In our test runs, a single run found roughly half of the vulnerabilities that repeated runs found in total.
+## 設計原則
 
-## Contact
+- **実証された信頼境界の破綻だけを確認済みにする。** ソース上の根拠があっても検証できない候補は、未確認の事実を明示して `needs_validation` にします。
+- **反証を重視する。** 発見したエージェントとは別のエージェントが検証します。
+- **深刻度には影響の裏付けが必要。** チェックリストからの逸脱ではなく、発生可能性 × 影響で評価します。
+- **多層防御の不足だけでは脆弱性にならない。** 防御層 A が攻撃を止めているなら、防御層 B の欠如は強化提案として扱います。
+- **繰り返しの監査で調査範囲が広がる。** テストでは、1回の実行で見つかった脆弱性は、複数回の実行で見つかった総数のおよそ半分でした。
 
-Questions, feedback, or comparing notes on AI-driven security tooling: security-ai-research@cloudflare.com
+## 連絡先
 
-## License
+質問、フィードバック、AI を使ったセキュリティツールについての情報交換：security-ai-research@cloudflare.com
 
-MIT -- see [LICENSE](LICENSE).
+## ライセンス
+
+MIT。[正式なライセンス原文](LICENSE)と[参考日本語訳](LICENSE.ja.md)を参照してください。

@@ -1,101 +1,101 @@
-# Memory Safety, Binary, and Kernel Hunting
+# メモリ安全性・バイナリ・カーネルの脆弱性探索
 
-#### When to use this file
+#### このファイルを使う場面
 
-Reach for this file when the target processes untrusted bytes in a memory-unsafe or privileged context: C/C++/Objective-C, Rust `unsafe`, FFI, kernel modules and drivers, parsers and decoders, network daemons, firmware, binary loaders, language runtimes, and JITs. Use `PROTOCOLS-RPC-AND-MESSAGING.md` for protocol authorization and state-machine logic, and this file for process integrity, memory safety, ABI boundaries, and loader behavior.
+C/C++/Objective-C、Rust の `unsafe`、FFI、カーネルモジュール・ドライバー、パーサー・デコーダー、ネットワークデーモン、ファームウェア、ローダー、言語ランタイム、JIT など、メモリ安全でない、または特権的な文脈で非信頼バイト列を処理する場合に使います。プロトコルの認可・状態遷移は `PROTOCOLS-RPC-AND-MESSAGING.md`、プロセスの完全性、メモリ、ABI、ロード処理は本書で扱います。
 
-Pick relevant classes from Phase 1 and split large targets by parser, allocator/lifetime, FFI, concurrency, loader, runtime, or privileged interface.
+第1段階から関連分類を選び、大きな対象はパーサー、確保／寿命、FFI、並行処理、ローダー、ランタイム、特権インターフェースに分けます。
 
-## Core discipline (include in every agent prompt for this domain)
+## Core discipline（基本原則：この分野の各エージェントへのプロンプトに含める）
 
+```text
+- 攻撃者入力と全呼出元から境界値・寿命を導き直す。典型例ではなく受理される最悪条件で検証する。
+- panic、サニタイザー検出、クラッシュは、現実的な非信頼入力で到達する場合に限り欠陥の証拠になる。名称だけでメモリ破壊、コード実行、共有可用性への影響を推測しない。
+- ローカルハーネス、サニタイザー、決定的な並行テスト、既存 fuzz 対象、デバッガーで障害を分類する。不変条件の破綻と観測可能な影響を示したら止め、破壊後の悪用技法を作らない。
+- アセンブリ、JIT、独自アロケーター、オブジェクト内部アクセス、外部ライブラリは計測を逃れ得る。関係するどの命令が計測されるか確認する。
+- ソース証拠と限定したローカル検証で欠陥と結果を確立した場合だけ `confirmed` にする。ABI、アロケーター、CPU、機能、デプロイ、到達性が不明なら `needs_validation` にする。
 ```
-- Re-derive every bound and lifetime from attacker-controlled inputs and all callers. Validate against the worst accepted case, not a typical test vector.
-- A panic, sanitizer finding, or crash proves a defect only when a realistic untrusted input reaches it. Do not infer memory corruption, code execution, or shared availability impact from a label alone.
-- Validate in a local harness with sanitizers, deterministic concurrency tests, existing fuzz targets, and debugger-assisted fault classification. Stop after proving the violated invariant and observable impact; do not develop post-corruption techniques.
-- Assembly, JIT code, custom allocators, intra-object accesses, and foreign libraries can escape sanitizer coverage. Identify which relevant instructions are instrumented.
-- Classify as `confirmed` only after source evidence and bounded local validation establish the defect and effect. Use `needs_validation` when ABI, allocator, architecture, feature, deployment, or reachability facts remain unknown.
-```
 
-## Bounds, integer, and representation attack classes (subagent_type: `general`)
+## 境界・整数・表現の攻撃分類（subagent_type: `general`）
 
-**Out-of-bounds read or write**
-A length, offset, index, or terminator reaches a fixed or allocated buffer without a correct bound. Recalculate available headroom after prefixes, alignment, padding, and terminators. Check both source and destination capacity, and whether a short input is read before its declared length is trusted.
+**Out-of-bounds read or write**（範囲外の読み書き）
+長さ、オフセット、添字、終端が正しい制限なしにバッファーへ届かないか確認します。接頭辞、整列、パディング、終端後の余裕を再計算します。コピー元と先の容量、宣言長を信用する前の短い入力の読み出しも調べます。
 
-**Integer overflow, underflow, truncation, and signedness**
-Review attacker-controlled arithmetic before allocation, copy, loop, indexing, and pointer operations. High-hit patterns include `a - b` with `b > a`, `count * element_size`, additions near the type maximum, negative values converted to unsigned, 64-bit lengths narrowed to 32-bit fields, and sentinel values such as `-1` becoming a large size. Confirm which checked representation is later used.
+**Integer overflow, underflow, truncation, and signedness**（整数の桁あふれ・桁下がり・切り詰め・符号）
+確保、コピー、ループ、添字、ポインターの前の演算を調べます。`b > a` の `a - b`、`count * element_size`、型の最大付近の加算、負数の unsigned 化、64→32 bit の縮小、`-1` の巨大サイズ化などを確認し、検査した表現が後で使われるか追います。
 
-**Unit and pointer-depth confusion**
-Code mixes bytes, elements, code units, pages, words, wire units, or nested pointer element sizes. Compare the unit at parse, validation, allocation, API boundary, and copy. A bounds check using the same wrong unit as the allocation is still wrong.
+**Unit and pointer-depth confusion**（単位・ポインター階層の混同）
+バイト、要素、コード単位、ページ、ワード、通信単位、入れ子ポインターの要素サイズを比較します。解析、検証、確保、API 境界、コピーの単位を確認します。確保と検査が同じ誤単位でも安全にはなりません。
 
-**Uninitialized or partially initialized data**
-A buffer, padding, struct field, or vector capacity is returned, compared, hashed, serialized, or passed across a trust boundary before initialization. Require an observable consumer and realistic output length; stack allocation by itself is not disclosure.
+**Uninitialized or partially initialized data**（未初期化・部分初期化データ）
+バッファー、パディング、構造体項目、ベクター容量が初期化前に返却、比較、ハッシュ、シリアライズ、越境されないか確認します。観測可能な利用先と現実的な出力長が必要で、スタック確保だけでは漏えいになりません。
 
-## Lifetime, type, and concurrency attack classes (subagent_type: `general`)
+## 寿命・型・並行処理の攻撃分類（subagent_type: `general`）
 
-**Use-after-free, stale view, and double free**
-Owners are released while callbacks, wait queues, timers, iterators, borrowed slices, or cached raw pointers can still use them. Review every error, cancellation, close, and realloc path. For embedded notification anchors, each free path must drain or detach all observers.
+**Use-after-free, stale view, and double free**（解放後使用・古いビュー・二重解放）
+コールバック、待機キュー、タイマー、イテレーター、借用スライス、キャッシュ生ポインターが使えるまま所有者を解放しないか調べます。エラー、取消、close、realloc の全経路と、埋め込み通知の全解放経路で監視者を排出・切離しするか確認します。
 
-**Type confusion and invalid downcast**
-A tag, vtable, union discriminator, object kind, or foreign handle is checked differently from the representation later read. Look for unchecked dynamic casts, stale tags after reuse, and serialized types whose validated element differs from the element consumed. Confirm a wrong-type read or write locally without extending the test beyond the violated invariant.
+**Type confusion and invalid downcast**（型混同・不正なダウンキャスト）
+タグ、vtable、union 判別子、種別、外部ハンドルの検査と利用する表現が一致するか調べます。未検証キャスト、再利用後の古いタグ、検証した要素と消費する要素の差を確認します。誤型の読書きをローカルで示し、不変条件の破綻以上へ広げません。
 
-**Reference-count and ownership races**
-Non-atomic retain/release, a check followed by an unlocked use, or inconsistent ownership across threads can free or mutate an object during access. Compare fast, error, shutdown, and compatibility paths for the same lock and ownership rules.
+**Reference-count and ownership races**（参照数・所有権の競合）
+非原子的 retain/release、検査後のロックなし利用、スレッド間の所有権差で利用中の解放・変更がないか調べます。高速、エラー、終了、互換経路でロックと所有権を比較します。
 
-**Shared-state races and TOCTOU**
-Concurrent parser streams, global caches, lazy initialization, signal handlers, and resource teardown can invalidate bounds, policy, or pointers established earlier. Verify the race with a repeatable local schedule, barrier, or thread sanitizer; a hypothetical interleaving without a security-relevant state transition remains `needs_validation`.
+**Shared-state races and TOCTOU**（共有状態の競合・TOCTOU）
+並行パーサー、全体キャッシュ、遅延初期化、シグナル、後片付けが確立済みの境界、ポリシー、ポインターを無効にしないか確認します。再現可能なスケジュール、バリア、ThreadSanitizer で示します。重要な状態変化のない仮想的な順序は `needs_validation` に留めます。
 
-**Lock-order, deadlock, and starvation**
-Externally reachable operations acquire locks in inconsistent order or hold them across callbacks and blocking I/O. Report under availability only when bounded input can stop shared progress; otherwise record it for fixing as a concurrency defect.
+**Lock-order, deadlock, and starvation**（ロック順序・デッドロック・飢餓）
+外部から到達する操作が逆順ロックを取ったり、コールバック・ブロッキング I/O 中に保持したりしないか確認します。制限された入力で共有処理を止める場合だけ可用性として報告し、その他は並行処理の修正課題とします。
 
-## FFI and ABI attack classes (subagent_type: `general`)
+## FFI・ABI の攻撃分類（subagent_type: `general`）
 
-**Pointer-length and ownership contract mismatch**
-Caller and callee disagree on who allocates, frees, pins, or mutates a buffer, how long a pointer remains valid, or whether a length is bytes or elements. Trace both sides of every `extern`, CGo/JNI/Python/native binding, and generated wrapper. Check null, zero length, aliasing, and callback retention.
+**Pointer-length and ownership contract mismatch**（ポインター長・所有権契約の不一致）
+確保、解放、固定、変更の担当、ポインターの寿命、バイト／要素単位について呼出側と受取側を比較します。`extern`、CGo/JNI/Python/native、生成ラッパーの両側を追い、null、長さゼロ、別名参照、コールバック保持を確認します。
 
-**Layout, alignment, and enum disagreement**
-Foreign code receives a struct, bitfield, packed record, callback signature, integer width, enum, or calling convention that differs by architecture or build flag. Verify `repr`, packing, alignment, endianness, and ABI-specific types. An in-repo declaration mismatch can be confirmed locally; an opaque foreign implementation requires `needs_validation`.
+**Layout, alignment, and enum disagreement**（レイアウト・整列・enum の不一致）
+CPU・ビルドフラグで構造体、ビットフィールド、packed 記録、コールバック、整数幅、enum、呼出規約が変わらないか確認します。`repr`、packing、alignment、endianness、ABI 型を調べます。リポジトリ内の宣言差はローカルで確認でき、不透明な外部実装は `needs_validation` です。
 
-**Unwind, exception, and thread-affinity violations**
-Exceptions or panics cross an ABI that forbids unwinding, callbacks run after teardown, or APIs requiring one runtime thread are invoked elsewhere. Review error conversion and cancellation. Confirm whether the process aborts or state is corrupted before assigning impact.
+**Unwind, exception, and thread-affinity violations**（unwind・例外・スレッド制約の違反）
+unwind 禁止 ABI を例外・panic が越える、終了後にコールバックが動く、特定スレッド必須 API を別で呼ぶ経路を調べます。エラー変換と取消を読み、abort か状態破壊かを確認してから影響を付けます。
 
-## Binary loading and runtime attack classes (subagent_type: `general`)
+## バイナリ読込・ランタイムの攻撃分類（subagent_type: `general`）
 
-**Library, plugin, and executable search-order trust**
-A privileged process loads a library, plugin, runtime image, or helper from a path writable by a less-trusted principal, or resolves a bare name through an attacker-influenceable working directory or environment. Compare intended installation ownership with each fallback and compatibility search path. A user loading their own plugin into their own process is not a boundary violation.
+**Library, plugin, and executable search-order trust**（ライブラリ・プラグイン・実行ファイルの検索順の信頼）
+特権プロセスが低信頼主体の書込可能パスから読み込む、または作業ディレクトリ・環境によって裸の名前を解決しないか確認します。設置先所有権と全代替・互換検索先を比較します。本人のプロセスに本人のプラグインを読むのは越境ではありません。
 
-**Missing artifact identity or signature binding**
-A loader verifies one file or metadata record but maps a different image because path resolution, file replacement, architecture slices, or embedded resources are not bound to the check. Supply-channel authenticity belongs in `SUPPLY-CHAIN-AND-RELEASE.md`; this class covers the local verification-to-map gap.
+**Missing artifact identity or signature binding**（成果物 ID・署名との結び付け欠落）
+検証したファイル・メタデータと、パス解決、入替、CPU スライス、埋込資源のために実際に map する像が異ならないか確認します。配布経路の真正性は `SUPPLY-CHAIN-AND-RELEASE.md`、本分類はローカルの検証→map の隙間です。
 
-**Malformed binary metadata and relocation handling**
-Offsets, counts, sections, relocations, symbols, bytecode, or debug metadata are trusted before range, overlap, and representation checks. Test parsers with bounded local fixtures and sanitizers. Separate memory corruption from a safely rejected malformed file.
+**Malformed binary metadata and relocation handling**（不正バイナリのメタデータ・再配置処理）
+オフセット、件数、セクション、再配置、シンボル、バイトコード、デバッグ情報を範囲・重複・表現検査前に信頼しないか確認します。小さなローカルフィクスチャとサニタイザーで、メモリ破壊と安全な拒否を区別します。
 
-**JIT and generated-code consistency**
-Validator, interpreter, optimizer, and generated code disagree about types, bounds, side effects, or lifetime. Diff optimized and unoptimized paths using the same local input. Confirm a process-integrity effect; output variance that stays within language semantics is not a finding.
+**JIT and generated-code consistency**（JIT・生成コードの整合性）
+検証器、インタープリター、最適化器、生成コードで型、境界、副作用、寿命が異ならないか確認します。同じ入力で最適化有無を比較し、プロセス完全性への影響を確認します。言語仕様内の出力差は指摘にしません。
 
-**Unload, reload, and teardown safety**
-Live function pointers, callbacks, worker threads, or data views survive module unload or runtime reset. Review shutdown and failed-load cleanup as closely as startup.
+**Unload, reload, and teardown safety**（unload・reload・終了の安全性）
+モジュール解除・ランタイムリセット後に関数ポインター、コールバック、ワーカー、データビューが残らないか調べます。終了と読込失敗時の後始末を起動と同じ注意で読みます。
 
-## Kernel and privileged-interface attack classes (subagent_type: `general`)
+## カーネル・特権インターフェースの分類（subagent_type: `general`）
 
-**User-copy bounds and repeated reads**
-A syscall, ioctl, driver, or kernel parser derives a trusted fact from user memory then reads the same mutable address again. Copy the full request once or revalidate the later copy. Also audit size, direction, and access checks at each user-copy primitive.
+**User-copy bounds and repeated reads**（ユーザーコピーの境界・再読み出し）
+syscall、ioctl、ドライバー、カーネルパーサーがユーザーメモリから得た事実を信頼し、同じ可変アドレスを再読しないか確認します。要求全体の一度のコピー、または後のコピーの再検証が必要です。各 user-copy のサイズ、方向、アクセス検査も確認します。
 
-**Privileged object lifecycle and dispatch consistency**
-Externally reachable objects have unbalanced retain/release, teardown without observer drain, unchecked selector/table indices, or duplicated compatibility paths that omit a guard. Diff each dispatch and free path side by side.
+**Privileged object lifecycle and dispatch consistency**（特権オブジェクトの寿命・振り分けの一貫性）
+外部到達オブジェクトの retain/release 不均衡、監視者未排出、未検査の selector／表添字、ガードが抜けた互換経路を探します。振り分けと解放経路を横並びで比較します。
 
-**Under-authorized powerful interfaces**
-A device node, admin socket, helper, or management API validates shape but not the caller's authority over the resource. Establish actual interface ownership and reachability; permissions or sandbox policy outside the repository make this `needs_validation`.
+**Under-authorized powerful interfaces**（強力な機能の認可不足）
+デバイス、管理ソケット、ヘルパー、管理 API が形だけを検証し、呼出元の資源権限を確認しないか調べます。実際の所有権・到達性を確定し、外部の権限・隔離ポリシーが必要なら `needs_validation` にします。
 
-## Universal moves (apply across the above)
+## Universal moves（共通の調べ方）
 
-- Audit fixes and duplicated paths for the same source-to-sink shape. A check in one caller, architecture, protocol role, feature flag, or compatibility path does not protect its siblings.
-- Build a table for every parser or FFI boundary: accepted length/type, checked representation, allocation owner, consumer, thread, and teardown. Most native findings are one disagreement in that table.
-- Use existing corpora and small locally generated boundary fixtures. Save exact sanitizer/runtime output and the input property that triggers it; avoid large resource consumption and any live target.
+- 修正箇所と重複経路で同じ入力→処理先を探します。1つの呼出元、CPU、役割、機能フラグ、互換経路の検査は他を保護しません。
+- パーサー／FFI ごとに受理長・型、検査表現、確保所有者、利用先、スレッド、終了処理の表を作ります。多くの欠陥は表の1か所の不一致です。
+- 既存コーパスと小さい境界フィクスチャを使い、正確な検出・実行出力と誘発する入力特性を保存します。大量消費や稼働対象は避けます。
 
-## Validation rules (apply before reporting ANY finding here)
+## Validation rules（検証ルール：報告前にすべて適用）
 
-1. Establish a realistic untrusted entry and exact operation that violates a bounds, type, lifetime, ABI, concurrency, loader, or authority invariant.
-2. Classify the observable effect: invalid read, invalid write, stale alias, wrong object, uninitialized output, unauthorized image load, deadlock, or safe process termination. Do not claim a stronger effect than observed.
-3. Run the narrowest local harness, existing test, sanitizer, or fuzzer needed to reproduce the effect. Verify sanitizer coverage of the faulting operation and record architecture/build conditions.
-4. For concurrency, use a deterministic schedule or sanitizer trace. For binary loading, prove the checked identity differs from the mapped identity and name the lower-trust writer.
-5. Return `confirmed` findings only with exact input, source trace, and observed result. Return `needs_validation` for a specific unresolved reachability, ABI, build, deployment, or runtime fact and state the bounded check needed.
+1. 現実的な非信頼入力と、境界・型・寿命・ABI・並行性・ロード・権限の不変条件を破る正確な操作を示します。
+2. 不正読取、不正書込、古い別名参照、誤オブジェクト、未初期化出力、未許可ロード、デッドロック、安全なプロセス停止を区別し、観測以上の影響を主張しません。
+3. 最小のハーネス、既存テスト、サニタイザー、ファザーで再現します。問題命令の計測範囲と CPU・ビルド条件を記録します。
+4. 競合には決定的スケジュールか計測トレース、ロードには検査 ID と map ID の不一致、および低信頼の書き手を示します。
+5. 正確な入力、ソース経路、観測結果が揃う場合だけ `confirmed` にします。`needs_validation` は未解決の到達性、ABI、ビルド、デプロイ、実行時事実と限定した確認方法を示します。

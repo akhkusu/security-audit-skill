@@ -1,83 +1,83 @@
-# AI, LLM, and Agent Hunting
+# AI・LLM・エージェントの脆弱性探索
 
-#### When to use this file
+#### このファイルを使う場面
 
-Reach for this file when a language model participates in a trust-sensitive decision: chatbots and assistants, RAG pipelines, persistent agent memory, agent/tool-calling loops, MCP servers and clients, code that builds prompts from untrusted input, or code that consumes model output and acts on it. The important data flow is *untrusted content → model or memory → capability, authority, or sink*.
+チャットボット、アシスタント、RAG、永続メモリ、エージェントのツール呼び出しループ、MCP サーバー／クライアント、信頼できない入力からのプロンプト組み立て、モデル出力に基づく操作など、モデルが信頼に関わる判断に参加する場合に使います。重要な流れは「信頼できない内容 → モデルまたはメモリ → 機能・権限・危険な処理先」です。
 
-Use this alongside `ATTACK-CLASSES.md`, not instead of it. Transport, access control, query construction, filesystem use, and output rendering remain ordinary trust boundaries. This file covers the model-specific delegation layer. Split large targets by retrieval, memory, tool dispatch, MCP, and output handling.
+`ATTACK-CLASSES.md` と併用してください。通信、アクセス制御、クエリ構築、ファイル操作、表示処理にも通常の信頼境界があります。本書はモデル固有の権限委譲を扱います。大きな対象は検索、メモリ、ツール振り分け、MCP、出力処理に分割します。
 
-## Core discipline (include in every agent prompt for this domain)
+## Core discipline（基本原則：この分野の各エージェントへのプロンプトに含める）
 
+```text
+- プロンプトインジェクションだけでは指摘にしない。他の主体のコンテキストへの混入、依頼者にない権限の行使、閲覧できないデータの漏えい、直接到達できない処理先の操作など、コード上の境界破綻を必要とする。
+- モデル出力、メモリ、ツール説明、MCP 応答は信頼できない入力として扱う。権限付与、出力の信頼、永続状態の保存、危険な処理先への受け渡しを行うコードを示す。
+- ガードレール用プロンプトはセキュリティ境界ではない。確定的な検査、リソース単位の認可、隔離、対応関係の固定、制限された認証情報だけを防御として数える。
+- 攻撃者、影響を受ける主体、実効実行 ID、リソース、正確な操作、使用権限、観測できる影響を示す。本人が既存の権限で意図的に依頼した操作は、モデルが実行するだけで委譲の欠陥にはならない。
+- 認可と、操作を本人の意図に結び付ける制御は別である。攻撃者の内容によって、本人がその正確な操作を意図的に依頼・承認していないのに本人の有効な権限で実行された場合は、操作の結び付けの欠陥になる。
+- ソースの証拠と制限されたローカル検証で境界と結果を確立した場合だけ `confirmed` にする。必要なプロバイダー、デプロイ、モデル、レンダラー、ID の挙動を観測できなければ `needs_validation` にする。
 ```
-- Prompt injection alone is not a finding. Require a code-level boundary failure: content reaches another principal's context, invokes authority the requester lacks, discloses data they cannot read, or drives a sink they cannot reach directly.
-- Model output, memory, tool descriptions, and MCP responses are untrusted inputs. Point to the code that grants authority, trusts output, writes durable state, or feeds a sink.
-- A guardrail prompt is not a security boundary. Count only deterministic checks, resource-scoped authorization, isolation, binding, and constrained credentials.
-- State the attacker, affected principal, effective execution identity, resource, exact action, authority used, and observable impact. An intentional direct request to use the requester's existing authority is not a delegation defect merely because a model executes it.
-- Authorization and action binding are separate controls. Attacker-controlled content that causes an action under an affected principal's valid authority is an action-binding failure when that principal did not intentionally request or approve the exact action.
-- Classify every candidate as `confirmed` only after source evidence and bounded local validation establish the boundary and result. Use `needs_validation` when a required provider, deployment, model, renderer, or identity behavior is not observable locally.
-```
 
-## Context, retrieval, and memory attack classes (subagent_type: `general`)
+## コンテキスト・検索・メモリの攻撃分類（subagent_type: `general`）
 
-**Indirect injection through retrieved or ingested content**
-An attacker can write a RAG document, indexed page, file, email, issue body, tool response, or metadata that enters a different principal's model context. Trace who can write each source, how retrieval scopes it, whose session consumes it, and what capability is enabled there. Check isolation, resource authorization, and binding to the consuming principal's intent separately. The defect is a missing deterministic control, not persuasive text by itself.
+**Indirect injection through retrieved or ingested content**（取得・取り込み内容からの間接インジェクション）
+攻撃者が編集できる RAG 文書、索引ページ、ファイル、メール、Issue 本文、ツール応答、メタデータが別の主体のモデルコンテキストに入る経路を追います。各情報源の書き手、検索範囲、利用セッション、その場で使える機能を確認します。隔離、リソース認可、利用者の意図との結び付けを別々に調べます。欠陥は説得力のある文章自体ではなく、確定的な制御の欠落です。
 
-**Cross-session or cross-tenant context bleed**
-Conversation history, embeddings, retrieval results, or prompt caches are keyed too broadly. Verify tenant and ACL filters in the query itself and every cache key. A tenant field stored on an object is not enforcement if an alternate query, shared cache, or batch path omits it.
+**Cross-session or cross-tenant context bleed**（セッション・テナント間のコンテキスト混入）
+履歴、埋め込み、検索結果、プロンプトキャッシュのキーが広すぎないか確認します。クエリ自体とすべてのキャッシュキーでテナントと ACL を検査します。オブジェクトにテナント属性があっても、別クエリ、共有キャッシュ、バッチ経路で省略されれば制御にはなりません。
 
-**Persistent memory poisoning**
-Attacker-controlled content or model summaries are written into memory that later shapes another task, user, or privileged session. Review who may create, update, merge, and delete memory; its provenance and tenant scope; whether low-trust observations become durable instructions or facts; and whether retrieval distinguishes user preferences from tool policy. Memory intentionally saved by a user and used only for that user's intentional, allowed requests is not a cross-boundary finding.
+**Persistent memory poisoning**（永続メモリの汚染）
+攻撃者の内容やモデルの要約が、後のタスク、利用者、特権セッションに影響するメモリへ保存されないか調べます。作成・更新・統合・削除の権限、出所、テナント範囲、低信頼の観測が永続的な指示や事実に変わる箇所、利用者の好みとツールポリシーの区別を確認します。本人が意図して保存し、本人の意図した許可済みの依頼だけに使うメモリは境界違反ではありません。
 
-**Prompt role and provenance confusion**
-Prompt assembly lets untrusted text impersonate a system message, prior turn, tool result, policy, or memory record. Look for string concatenation, untyped history, caller-controlled role fields, and serialization round trips that lose source labels. Confirm that the forged provenance changes a deterministic trust decision or reaches a meaningful capability.
+**Prompt role and provenance confusion**（プロンプトの役割・出所の混同）
+信頼できない文字列が system メッセージ、過去の発言、ツール結果、ポリシー、メモリに成り済ませないか調べます。文字列連結、型のない履歴、呼び出し側指定の role、出所ラベルが失われるシリアライズ往復を確認します。偽の出所が確定的な信頼判断を変えるか、意味のある機能に到達することを示します。
 
-## Tool and action attack classes (subagent_type: `general`)
+## ツール・操作の攻撃分類（subagent_type: `general`）
 
-**Tool-argument injection into a downstream sink**
-Model-produced arguments reach SQL, shell, file, URL-fetch, or privileged APIs without handler-side validation. Treat the tool schema as input parsing, then follow each field from decoded call to sink. Structured output narrows shape; it does not establish authorization, safe paths, safe URLs, or query semantics.
+**Tool-argument injection into a downstream sink**（ツール引数から後段へのインジェクション）
+モデル生成の引数が、ハンドラー側の検証なしで SQL、シェル、ファイル、URL 取得、特権 API に届かないか追います。ツールスキーマは入力の構文解析と捉え、デコードから処理先まで各フィールドを確認します。構造化出力は形を制限しますが、認可、パス・URL の安全性、クエリの意味は保証しません。
 
-**Excessive agency and confused-deputy authority**
-The agent uses a service identity or broad credential, while the tool handler does not re-check the requesting principal's permission on the named resource. Verify both the effective identity and whether the caller could perform that exact operation through the normal product interface. A shared credential with enforced per-user query scope is not a defect.
+**Excessive agency and confused-deputy authority**（過大な自律権限と confused deputy（権限を持つ代理の悪用））
+サービス ID や広い認証情報を使うエージェントについて、指定リソースに対する依頼者の権限をハンドラーが再確認するか検査します。実効 ID と、通常の製品 UI から同じ操作が可能かを確認します。共有認証情報でもユーザーごとのクエリ範囲が強制されていれば欠陥ではありません。
 
-**Action-confirmation and approval binding**
-A user approves one described action but execution can use changed arguments, a different resource, a different principal, or a later model turn. An action-binding defect also exists when attacker-controlled content causes a side effect under a victim's valid authority without the victim's intentional request or approval, even if generic authorization permits the victim to perform it. Review whether intent or confirmation binds the normalized tool name, complete argument object, requester, target, amount, expiry, and batch membership. Check retries and resumed sessions: an approval must not authorize a mutated or duplicate side effect.
+**Action-confirmation and approval binding**（操作確認・承認の結び付け）
+説明された操作への承認後に、引数、リソース、主体、モデルのターンが変わらないか確認します。一般的な認可が許可していても、攻撃者の内容が本人の意図的な依頼・承認なしに副作用を起こせば欠陥です。正規化されたツール名、引数全体、依頼者、対象、金額、有効期限、バッチ構成を意図や承認に固定するか調べます。再試行・再開でも、変化した操作や重複した副作用を承認済み扱いにしないことを確認します。
 
-**Tool-schema and dispatcher disagreement**
-The schema accepts aliases, extra fields, duplicate keys, coercions, nested free-form objects, or out-of-range values that the dispatcher or handler interprets differently. Compare schema validation, canonicalization, generated bindings, and handler defaults. Validate again where values become resource selectors or security-relevant options.
+**Tool-schema and dispatcher disagreement**（ツールスキーマとディスパッチャーの解釈不一致）
+別名、余分なフィールド、重複キー、型変換、自由形式の入れ子、範囲外値を別の意味に解釈しないか比較します。スキーマ検証、正規化、生成バインディング、ハンドラーの既定値を確認し、リソース選択や安全性に関わるオプションになる地点で再検証します。
 
-**Unbounded delegated action loops**
-A bounded request can enqueue repeated spend, send, mutation, or external API work without a per-request budget, per-action authorization, cancellation, or idempotency control. Confirm impact on shared cost, quotas, other users, or durable state. Do not test by exhausting a service; use code-level accounting and a locally bounded loop.
+**Unbounded delegated action loops**（委譲操作ループの無制限化）
+限定的な依頼が、予算、操作ごとの認可、取り消し、冪等性制御なしに、支出・送信・変更・外部 API 呼び出しを繰り返し追加できないか調べます。共有費用、クォータ、他ユーザー、永続状態への影響を示します。サービスを枯渇させず、コード上の計数と制限したローカルループで検証します。
 
-## MCP and sub-agent trust classes (subagent_type: `general`)
+## MCP・サブエージェントの信頼に関する分類（subagent_type: `general`）
 
-**Sub-agent and MCP trust inheritance**
-A delegated task receives the full session, credentials, memory, or capabilities rather than the least authority required. Check the principal and tenant carried into each call, capability narrowing, credential audience, and whether delegated results are treated as untrusted on return.
+**Sub-agent and MCP trust inheritance**（信頼・権限の過大な継承）
+委譲先に必要最小限ではなく、セッション全体、認証情報、メモリ、機能を渡していないか確認します。各呼び出しの主体・テナント、機能の制限、認証情報の宛先、返却結果を非信頼入力として扱うかを調べます。
 
-**MCP server and tool identity confusion**
-Calls or results are routed by attacker-influenceable server names, tool names, request IDs, resource URIs, or model-selected aliases rather than the authenticated connection and outstanding request. Check whether two servers can claim the same tool or resource identity, whether reconnect changes the binding, and whether a response from one server can satisfy another server's pending call.
+**MCP server and tool identity confusion**（MCP サーバー・ツールの識別混同）
+認証済み接続と未完了の要求ではなく、攻撃者が影響できるサーバー名、ツール名、要求 ID、リソース URI、モデル選択の別名で呼び出しや結果を振り分けないか確認します。複数サーバーによる同じ識別子の主張、再接続での対応変更、別サーバーの応答による要求完了を調べます。
 
-**MCP metadata and schema as policy**
-Tool descriptions, resource metadata, prompts, completion hints, or schemas supplied by an MCP peer are trusted as policy or authorization. These fields can guide the model but cannot grant capability. Find the deterministic allowlist, server identity check, and handler authorization that remain authoritative when metadata conflicts.
+**MCP metadata and schema as policy**（MCP メタデータ・スキーマのポリシー扱い）
+相手が提供する説明、メタデータ、プロンプト、補完ヒント、スキーマを認可やポリシーとして信頼しないか調べます。これらはモデルを案内できますが権限は付与できません。矛盾した場合でも優先される確定的な許可リスト、サーバー ID 検査、ハンドラー認可を特定します。
 
-## Output and disclosure attack classes (subagent_type: `general`)
+## 出力・漏えいの攻撃分類（subagent_type: `general`）
 
-**Insecure output rendering**
-Model output reaches an executing HTML, Markdown, template, URL, or command sink without the sink's required encoding and policy. For browser rendering, verify auto-loaded resources and CSP or sanitization in `CLIENT-SIDE.md`; renderer behavior outside the repository makes the candidate `needs_validation`.
+**Insecure output rendering**（安全でない出力表示）
+モデル出力が必要なエンコードやポリシーなしで HTML、Markdown、テンプレート、URL、コマンドの実行先に届かないか確認します。ブラウザーでは `CLIENT-SIDE.md` に従い自動読込リソース、CSP、無害化を確認します。リポジトリ外のレンダラー挙動が必要なら `needs_validation` にします。
 
-**Sensitive context extraction**
-The assembled context contains credentials, another user's data, private source, or policy values that themselves grant access, and user-influenced output exposes them. Read prompt assembly and data-fetch code. Disclosure of generic instructions or behavior that does not cross a data boundary is not a finding.
+**Sensitive context extraction**（機密コンテキストの抽出）
+組み立てたコンテキストに認証情報、他人のデータ、非公開ソース、アクセスを可能にするポリシー値が入り、利用者が影響できる出力から漏れないか確認します。プロンプト組み立てとデータ取得を読みます。一般的な指示の開示など、データ境界を越えないものは指摘にしません。
 
-## Universal moves (apply across the above)
+## Universal moves（共通の調べ方）
 
-- Draw four maps first: each execution identity, each capability, every writable context or memory source, and each output destination. Then connect the principal at the start to the authority at the end.
-- Start at side-effecting tools and work backward through dispatcher, schema, confirmation, model context, retrieval, and ingestion. Start at durable memory reads and trace every writer.
-- Compare direct, queued, retry, resume, batch, and delegated paths for the same action. The strongest gate must apply after arguments are final and before every side effect.
+- 実行 ID、機能、書き込み可能なコンテキスト／メモリ、出力先の4つの図を作り、入口の主体と出口の権限をつなぎます。
+- 副作用のあるツールから、振り分け、スキーマ、確認、モデルコンテキスト、検索、取り込みへ逆に追います。永続メモリの読み出しから全書き込み元を追います。
+- 直接実行、キュー、再試行、再開、バッチ、委譲を比較します。引数確定後かつ副作用の直前に、最も強い制御を毎回適用する必要があります。
 
-## Validation rules (apply before reporting ANY finding here)
+## Validation rules（検証ルール：報告前にすべて適用）
 
-1. Name the crossed boundary and observable result: attacker, affected principal or shared resource, execution identity, target, and unauthorized or unrequested action or disclosure.
-2. For confused-deputy authority claims, prove the tool lacks requester-and-resource authorization and that the attacker cannot perform the same action normally. For action-binding claims, instead prove attacker-controlled content caused an action under the affected principal's authority that the principal did not intentionally request or approve. Valid generic authorization does not establish that intent.
-3. For memory or retrieval claims, cite both the attacker-controlled write and the later cross-principal read or privileged decision. A shared record without a reachable consumer is not enough.
-4. For action binding, establish the intentional request or normalized approved object, if any, and compare it with the object the handler uses. Confirm a locally observable unrequested action, mutation, duplicate, or authority change without extending the test into harmful execution. For schema disagreement, compare the normalized validated object with the handler's object.
-5. For MCP identity claims, verify the authenticated connection, request correlation, tool namespace, and effective credential. Mark `needs_validation` if external server identity or deployment routing is required.
-6. Return `confirmed` findings only with a complete source trace and meaningful result. Return `needs_validation` for a specific unresolved boundary fact and state the bounded local or owner-observed check needed to resolve it.
+1. 攻撃者、影響主体／共有資源、実行 ID、対象、未許可・未依頼の操作や漏えいを挙げ、越えた境界と結果を示します。
+2. confused deputy では依頼者とリソースの認可欠落、および通常は同じ操作が不可能なことを示します。操作の結び付けでは、攻撃者の内容が本人の意図的な依頼・承認なしに本人の権限で操作を起こしたことを示します。一般的な認可は意図の証明になりません。
+3. メモリ・検索では攻撃者による書き込みと、後の別主体の読み出し／特権判断を両方引用します。利用先に到達しない共有記録だけでは不十分です。
+4. 操作の結び付けでは、意図的な依頼や正規化した承認対象があればそれを確定し、ハンドラーが使う対象と比較します。有害な実行に広げず、未依頼操作、変更、重複、権限変化をローカルで観測します。スキーマ不一致では検証済みの正規化オブジェクトとハンドラーのオブジェクトを比較します。
+5. MCP では認証済み接続、要求の対応、ツール名前空間、実効認証情報を確認します。外部サーバー ID やデプロイ経路が必要なら `needs_validation` にします。
+6. 完全なソース経路と意味のある結果があるものだけを `confirmed` にします。未解決の境界上の事実には `needs_validation` を使い、解決に必要な範囲を制限したローカル検証または所有者による観測を示します。

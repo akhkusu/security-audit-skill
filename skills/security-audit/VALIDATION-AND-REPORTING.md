@@ -1,186 +1,164 @@
-# Validation, Structured Output, Verification, and Reporting
+# 候補検証・構造化出力・独立検証・報告
 
-### Phase 3: Independently validate every candidate
+### 第3段階：すべての候補を独立して検証する
 
-After the clean coverage-critic pass or an explicitly recorded early stop, consolidate Phase 2 candidates and carried same-source prior confirmations by stable fingerprint and root cause. Give every unique proposed `confirmed` and `needs_validation` candidate to a fresh `general` verifier that did not hunt it. A carried prior confirmation follows the same current verification path even though hunters exclude that unchanged root cause. A verifier may read hunter or prior artifacts but must re-read every cited current source location and independently run any decisive check it can reproduce safely.
+網羅性レビューが問題なしとなるか、早期停止を明記した後、第2段階の候補と同一ソースの過去確認済み記録を安定 fingerprint・根本原因で統合します。重複のない confirmed・needs_validation の提案を、それを探索していない新しい `general` 検証担当へ渡します。過去 confirmed も、探索除外されていても現在の検証を通します。探索・過去成果物は読めますが、現ソースの全引用箇所を読み直し、安全に再現できる決定的な検査は独立実施します。
 
-Assign each verifier a canonical lowercase unique ID and `<output-dir>/agents/<verifier-id>/scratch/` plus parent-owned `artifacts/`. The verifier writes only to `scratch/` and never writes retained artifacts. It receives only the candidate, its linked coverage-unit checks and artifact paths, architecture facts needed to interpret the path, exact relevant companion validation blocks, the promotion procedure block below, the source/local execution boundary, the `confirmed`, `needs_validation`, and `rejected` branches of `report-schema.json` copied verbatim, and prior records with the same fingerprint. It must not receive another verifier's conclusion.
+各検証担当に正規小文字の一意 ID と `<output-dir>/agents/<verifier-id>/scratch/`、親所有 artifacts を与えます。書けるのは scratch だけです。渡すのは候補、関連単位の検査・成果物パス、経路解釈に必要な architecture、該当補足の正確な検証ブロック、下の昇格手順、ソース／ローカル実行境界、report-schema の3判定分岐全文、同 fingerprint の過去記録だけです。他検証担当の結論を渡してはいけません。
 
-#### Candidate-verifier prompt
+#### 候補検証担当へのプロンプト
 
 ```text
-You did not write this candidate. Try to refute it from repository source and bounded
-local evidence. Do not contact deployed endpoints or external/shared services. Run
-target-controlled code only inside the approved OS-enforced sandbox: no external
-network, empty allowlisted environment, read-only target and tools, scratch-only
-writes, and explicit low resource and wall-clock limits. If any control is unavailable,
-do not execute; retain the exact missing capability as a needs_validation blocker.
-Treat every scratch entry as target-controlled after execution. After the sandbox and
-all its processes terminate, only trusted parent-side code may promote a predeclared
-scratch-relative file, following the promotion procedure block included verbatim in
-this prompt. You and target code never write retained artifacts. If promotion is
-unavailable or fails, do not use that file as evidence.
+この候補を書いたのはあなたではありません。ソースと範囲を制限したローカル証拠から反証してください。
+配備先や外部・共有サービスへ接続しません。対象コードは承認された OS 強制 sandbox 内だけで
+実行します。外部通信なし、空から許可変数だけの環境、対象・tool 読取専用、scratch のみ書込、
+低い資源・実時間上限が必要です。1つでも不足なら実行せず、正確な不足能力を needs_validation の
+阻害要因にします。終了後も scratch はすべて対象制御と考えます。sandbox と全 process 終了後、
+信頼する親側コードだけが、このプロンプトにそのまま含めた昇格手順で事前指定ファイルを保存します。
+担当と対象コードは保持成果物を書きません。昇格が不能・失敗ならそのファイルを証拠にしません。
 
-1. Verify every trace and evidence file, positive line number, scope, and description.
-   Confirm the first entry is a real lower-trust entrypoint and the last is the
-   claimed sink or boundary effect.
-2. Reconstruct the strongest source-visible validation, identity, authorization,
-   normalization, lifecycle, framework, and containment controls on the path.
-   Where the architecture summary names a comparable baseline, note whether it
-   shares the pattern — as calibration, never as grounds to dismiss.
-3. For a proposed confirmed candidate, independently reproduce the minimum observed
-   result when possible. Verify inputs, interface shape, conditions, and affected
-   dummy principal/resource. Do not infer a stronger result or continue after it.
-4. Verify that likelihood, impact, confidence, and the proposed source fix match only
-   what the evidence establishes.
-5. For a proposed needs_validation candidate, decide whether the blocker is genuinely
-   outside source/local observation. If source refutes the trace, reject it. If the
-   missing fact remains decisive, keep needs_validation and make the local and
-   owner-observed plans exact and non-destructive.
-6. Preserve the fingerprint for the same source-derived root cause across every state.
+1. trace・evidence の全 file、正の line、scope、description を検証します。最初が本当の低信頼入口、
+   最後が主張する処理先・越境効果か確認します。
+2. 経路上の最も強い検証、ID、認可、正規化、ライフサイクル、framework、封じ込め制御を再構成します。
+   類似製品が architecture にあれば、同型かを調整材料として記し、却下理由には使いません。
+3. confirmed 提案は可能なら最小観測結果を独立再現します。入力、interface の形、条件、影響する
+   ダミー主体・資源を確認し、強い結果を推測せず、最小結果後は継続しません。
+4. likelihood、impact、confidence、ソース修正案が証拠だけに対応するか確認します。
+5. needs_validation は阻害要因が本当にソース・ローカル観測外か判断します。ソースで反証できれば
+   rejected。不明点が依然決定的なら needs_validation のまま、local・所有者観測計画を正確で
+   非破壊的にします。
+6. 同じソース由来根本原因は全状態で fingerprint を維持します。
 
-Return exactly one JSON object and no surrounding prose:
+前後に文章を付けず JSON オブジェクトを厳密に1つ返してください。
 {"decision": "confirmed|needs_validation|rejected", "record": { ... }}
-where record exactly matches the decision's verdict branch of the schema included
-in this prompt. A corrected record replaces the hunter's wording.
+record は渡された schema の decision に対応する verdict 分岐へ厳密に一致させます。
+修正した記録が探索担当の文章を置き換えます。
 ```
 
-Copy this promotion procedure verbatim into every candidate-verifier prompt:
+次の昇格手順を全候補検証プロンプトへそのままコピーします。
 
 ```text
-Artifact promotion procedure (trusted parent-side code only):
-Reference only for you: the parent performs these steps; you never perform them.
+成果物の昇格手順（信頼する親側コードだけが実施）：
+担当者は参照するだけです。実施するのは親であり、担当者ではありません。
 
-Before execution, the parent opens and retains trusted, non-inheritable directory
-descriptors for the agent's scratch/ and artifacts/ roots, and records an allowlist
-of expected scratch-relative artifact files plus explicit per-file and cumulative
-byte limits. Never pass those descriptors to the agent or sandbox. After the sandbox
-and all its processes terminate, trusted parent-side code promotes each allowlisted
-file separately:
+実行前に親が、信頼できる継承不可の scratch/・artifacts/ root directory descriptor を
+開いて保持し、許可する scratch 相対ファイルと個別・合計バイト上限を記録します。
+descriptor は担当や sandbox へ渡しません。sandbox と全プロセスの終了後に、
+信頼する親側コードが許可ファイルを1つずつ昇格します。
 
-1. Validate the declared relative path: reject absolute, empty, `.`, `..`, or
-   symlinked components.
-2. Walk each parent component from the retained scratch-root descriptor with
-   no-follow directory-relative operations; never reopen by path.
-3. Open the leaf no-follow and nonblocking.
-4. Verify with `fstat` that it is a regular file with link count exactly one and
-   within the recorded per-file and cumulative byte limits.
-5. Enforce those limits again while reading from that descriptor.
-6. Copy exactly the verified size, repeat `fstat`, and reject a changed identity,
-   type, link count, or size.
-7. For the destination, walk every parent component from the retained
-   artifacts-root descriptor with no-follow directory-relative operations; require
-   each existing component to be a real directory, and create any missing directory
-   exclusively before reopening and verifying it no-follow.
-8. Create the leaf exclusively without following links, verify that the opened
-   destination is a regular file with link count exactly one, and copy from the
-   verified source descriptor without reopening either path.
-9. Use equivalent race-safe APIs on non-POSIX systems.
-10. Never recursively copy or glob scratch, extract an archive into artifacts, or
-    open or promote a symlink, FIFO, socket, device, directory, hard-linked file,
-    changing file, or file that exceeds its bound.
-11. If any check is unavailable, cannot be enforced, or fails, discard the scratch
-    entry; if it is decisive evidence, retain `needs_validation` with the exact
-    promotion blocker.
+1. 宣言相対パスを検査し、絶対、空、`.`、`..`、symlink の成分を拒否する。
+2. 保持した scratch-root descriptor から各親を no-follow の directory-relative 操作で
+   走査する。パスで開き直さない。
+3. 末端を no-follow・非 blocking で開く。
+4. `fstat` で通常ファイル、link count が厳密に1、個別・合計上限以内と確認する。
+5. descriptor から読む間も上限を再度強制する。
+6. 検証サイズだけコピーし、再 `fstat` で ID、型、link count、サイズの変化を拒否する。
+7. 宛先も保持した artifacts-root descriptor から全親を no-follow で走査する。
+   既存成分は実 directory とし、不足分は排他的に作成して no-follow で開き直し検証する。
+8. 末端は link を追わず排他的に作成し、通常ファイルかつ link count 1 を検証する。
+   どちらのパスも開き直さず、検証した元 descriptor からコピーする。
+9. 非 POSIX では同等の競合安全な API を使う。
+10. scratch の再帰コピー・glob、artifacts 内への archive 展開、symlink、FIFO、socket、
+    device、directory、hard link、変化中・上限超過ファイルの開封・昇格は禁止。
+11. 検査がない・強制不能・失敗なら scratch 項目を捨てる。決定的証拠なら正確な昇格阻害要因と
+    共に `needs_validation` を維持する。
 ```
 
-A verifier can promote `needs_validation` to `confirmed` only after independently establishing the complete path and bounded observed result. Demote proposed confirmation to `needs_validation` when a specific deployment or runtime fact remains unknown. Use `rejected` when source, local behavior, a visible control, missing meaningful impact, or an impossible prerequisite refutes the claim. `needs_validation` is never a parking place for a speculative idea.
+needs_validation を confirmed に上げられるのは、完全経路と限定観測結果を独立に確立した場合だけです。特定の配備・実行事実が不明なら confirmed 提案を needs_validation へ下げます。ソース、ローカル挙動、可視制御、意味ある影響の欠落、不可能な前提で反証されたら rejected にします。推測を保管するために needs_validation を使いません。
 
-The parent checks that each verifier returned the same fingerprint unless it identified a genuinely different root cause. Merge corrections, record the decision in every linked coverage unit, and ensure there is one final record per fingerprint. Discard a malformed or prose-wrapped verifier result without repairing it; re-run that candidate with a fresh verifier when the budget permits, otherwise it remains an unvalidated ledger candidate under the incomplete-run rule.
+親は同じ fingerprint が返るか確認します。本当に別の根本原因なら例外です。訂正を統合し、全関連単位へ判定を記録し、fingerprint あたり最終記録を1つにします。不正形式・文章で包んだ結果は補修せず破棄し、予算があれば新担当で再実行します。不足なら未完了規則に従い未検証 candidate に留めます。
 
-When verifier evidence updates a ledger check, set that check's `agent_id` to the verifier's canonical ID and list its nonempty repository-relative `reviewed_paths`. Keep the unit-level `reviewed_paths` equal to the union across checks. Use `method: "source"` with `artifact: null` for source-only review. Use `method: "local"` only with a file successfully promoted by trusted parent-side code below `agents/<check.agent_id>/artifacts/`. The unit retains its original assignment owner, so independently owned hunter and verifier checks can coexist. For a carried prior record's seeded `planned` unit there is no prior owner: the verifier that re-checks it becomes the unit's assignment owner, and its re-check is the unit's first check, moving the unit to `candidate` with the carried fingerprint.
+検証証拠で台帳を更新する場合、検査の agent_id は検証担当の正規 ID とし、空でない相対 reviewed_paths を記します。単位のパスは全検査の和集合です。source は artifact null、local は親が正常昇格した `agents/<check.agent_id>/artifacts/` のファイルだけです。単位の元割当所有者は変えず、独立所有の探索・検証証拠を共存させます。過去記録を引き継ぐ planned 単位に所有者がなければ、再確認担当が所有者となり、その最初の検査で fingerprint 付き candidate へ移します。
 
-If a strict total-agent budget cannot cover every candidate, set the run status to incomplete and follow the deterministic budget rule in `SKILL.md`. An unvalidated candidate remains only in the ledger. It does not enter `findings.json` under any verdict.
+厳密な総呼出し予算で全候補を賄えなければ、SKILL の決定的な予算規則に従い未完了にします。未検証候補は台帳だけに残し、どの判定でも findings に入れません。
 
-### Phase 4: Write and validate `findings.json`
+### 第4段階：`findings.json` を出力・検証する
 
-The parent writes all independently decided records to `<output-dir>/findings.json`, sorted by fingerprint. Include:
+親は独立に判定済みの全記録を fingerprint 順に `<output-dir>/findings.json` へ書きます。
 
-- `confirmed`: source-grounded vulnerabilities with complete local execution evidence, conditions, specific remediation, likelihood/impact/overall severity, and confidence.
-- `needs_validation`: source-grounded candidates with an exact unresolved blocker and at least one applicable local or owner-observed deployment plan.
-- `rejected`: source-grounded candidates disproved during validation, retained so future runs do not repeat the unsupported claim without changed evidence.
+- `confirmed`：完全なローカル実行証拠、条件、具体的修正、可能性・影響・総合深刻度、確信度を持つソース根拠のある脆弱性。
+- `needs_validation`：正確な未解決阻害と、該当するローカルまたは所有者観測計画を最低1つ持つ候補。
+- `rejected`：検証で反証された候補。証拠が変わらないのに将来同じ主張を繰り返さないため保持します。
 
-Read `report-schema.json` immediately before writing. It uses `additionalProperties: false`; do not carry hunter wrapper fields into a record. Keep these verdict contracts distinct:
+出力直前に report-schema を読みます。`additionalProperties: false` のため、探索結果ラッパーの項目を持ち込みません。判定契約を区別します。
 
-- A `confirmed` record uses `root_cause`, `intended_behavior`, `conditions`, `execution`, `remediation`, `severity`, and `confidence`. It must not use `claimed_root_cause`, `blockers`, `validation_plan`, or `reason`. `execution` is target-neutral and uses the target's native interface: API/HTTP input, CLI call, library call, message, file fixture, browser action, rendered policy, or local harness as applicable. `observed_result` is nonempty and factual.
-- A `needs_validation` record uses `claimed_root_cause`, `trace`, `evidence`, `blockers`, and at least one nonempty `validation_plan.local` or `validation_plan.deployment` field. Include both only when both contexts can resolve distinct facts. It must not use severity, execution, remediation, reason, or confirmed root cause.
-- A `rejected` record uses `claimed_root_cause`, `trace`, `evidence`, and `reason`. It must not use severity, execution, remediation, blockers, validation plan, or confirmed root cause.
+- confirmed は root_cause、intended_behavior、conditions、execution、remediation、severity、confidence を使います。claimed_root_cause、blockers、validation_plan、reason は禁止です。execution は対象に合う API/HTTP、CLI、library、message、file fixture、browser、生成 policy、local harness を使い、稼働先に依存させません。observed_result は空でない事実です。
+- needs_validation は claimed_root_cause、trace、evidence、blockers と、空でない validation_plan.local または deployment を最低1つ使います。両方入れるのは別々の不明点を解決する場合だけです。severity、execution、remediation、reason、確認済み用 root_cause は禁止です。
+- rejected は claimed_root_cause、trace、evidence、reason を使います。severity、execution、remediation、blockers、validation_plan、確認済み用 root_cause は禁止です。
 
-Every record has a stable fingerprint, title, description, and repository-relative source paths. A multi-step trace begins with `entrypoint`, ends with `sink`, and uses `propagation` only between them. One-entry traces use `entrypoint` or `sink`. Overall severity cannot exceed demonstrated impact.
-
-Run:
+全記録に安定 fingerprint、title、description、相対ソースパスを付けます。複数 trace は entrypoint から sink まで、中間だけ propagation。1要素なら entrypoint または sink です。総合深刻度は実証影響を越えません。
 
 ```sh
 node <skill-dir>/validate-findings.cjs <output-dir>/findings.json
 node <skill-dir>/validate-coverage-ledger.cjs <output-dir>/coverage-ledger.json
 ```
 
-Fix every structural and semantic error before continuing. The findings validator rejects input beyond 5 MiB, 1,000 top-level findings, or 64 nesting levels, and caps reported error output at 100 messages. Validator success proves format and ledger consistency only.
+構造・意味エラーをすべて直してから続行します。findings 検証器は 5 MiB、トップレベル1,000指摘、入れ子64段を越える入力を拒否し、エラー表示は100件までです。合格が証明するのは形式と台帳の整合だけです。
 
-### Phase 5: Verify the final records with fresh eyes
+### 第5段階：新しい担当で最終記録を確認する
 
-Launch one fresh `research` verifier per final `confirmed` and `needs_validation` record, in parallel. This verifier checks the structured record, not the hunter write-up, and remains inside source/local boundaries.
+最終 confirmed・needs_validation の各記録に、新しい `research` 担当を1人ずつ並列起動します。探索メモではなく構造化記録を検証し、ソース／ローカル境界を守ります。
 
-In a `quick` run, Phase 3 and Phase 5 merge: the Phase 3 verifier also performs these record checks and returns the final schema-shaped record, so each candidate gets one fresh independent reviewer instead of two. Every other profile keeps the two passes separate. Never skip independent review of a `confirmed` record in any profile.
+quick では第3・5段階をまとめ、同じ第3段階担当が以下も確認して最終 schema 記録を返します。候補につき新しい独立担当は2人でなく1人です。他 profile は2回を分けます。confirmed の独立レビューは全 profile で必須です。
 
-For `confirmed`, require it to check:
+confirmed の確認項目：
 
-1. Every repository-relative trace/evidence path, line, scope, and described operation.
-2. Real entry interface and exact local input shape.
-3. Every condition, parser/policy step, source-visible preventing layer, and observed local result.
-4. Affected principal/resource and demonstrated impact.
-5. Severity separation: realistic likelihood, demonstrated impact, overall no greater than impact.
-6. Remediation strategy and any `code_changes`, including whether the fix enforces the invariant without merely moving trust.
+1. trace/evidence の全相対パス、行、scope、操作説明。
+2. 実在する入口 interface と正確なローカル入力形式。
+3. 全条件、parser/policy、可視の防止層、観測ローカル結果。
+4. 影響主体・資源と実証影響。
+5. 現実的 likelihood、実証 impact、それを越えない overall の区別。
+6. remediation と code_changes が信頼の移動だけでなく不変条件を強制するか。
 
-For `needs_validation`, require it to check:
+needs_validation の確認項目：
 
-1. The source path is real and supports only the `claimed_root_cause` stated.
-2. Every listed blocker is decisive and not already answerable locally.
-3. The candidate names a boundary and a possible concrete result rather than a generic concern.
-4. At least one validation-plan field is present and exact. `local` uses a bounded fixture; `deployment` asks an owner to observe a configuration, identity, route, policy, or runtime fact. Do not invent a plan for an inapplicable context, and never send audit traffic to a deployment.
-5. The fingerprint matches prior/current records for the same root cause.
+1. ソース経路が実在し、記載した claimed_root_cause だけを裏付ける。
+2. 全阻害要因が決定的で、既にローカルで答えられるものではない。
+3. 一般的懸念でなく境界と具体的に起こり得る結果がある。
+4. 正確な計画欄が最低1つある。local は限定 fixture、deployment は所有者の設定・ID・経路・policy・runtime 観測。適用外の計画を作らず、配備先へ監査通信を送らない。
+5. 同じ根本原因の過去・現記録と fingerprint が一致する。
 
-Each verifier returns exactly one JSON object: `{"decision":"verified","fingerprint":"..."}` or `{"decision":"replace","reason":"...","record":{...}}`, with no surrounding prose. A replacement record must match its `confirmed`, `needs_validation`, or `rejected` schema branch. Treat a malformed or prose-wrapped Phase 5 result the same way as in Phase 3: discard it without repairing it and re-run with a fresh verifier when the budget permits.
+各担当は前後の文章なしで `{"decision":"verified","fingerprint":"..."}` または `{"decision":"replace","reason":"...","record":{...}}` を厳密に1つ返します。置換記録は対応する3判定の schema に従います。不正形式・文章付き結果は第3段階同様、補修せず破棄し、予算があれば新担当で再実行します。
 
-Do not apply a Phase 5 replacement as final when it promotes a record to a stronger verdict, including any promotion to `confirmed`, or materially changes the root cause, trace, execution input or observed result, demonstrated impact, or severity. Give that complete replacement to a new independent verifier that did not hunt, perform Phase 3 validation, or propose the Phase 5 replacement. The new verifier rechecks the current source and independently reproduces any decisive local result under the execution boundary, then returns `verified` or another replacement. Apply a material replacement only after this fresh verification. If another material replacement results, repeat with a fresh verifier. If budget or independence is unavailable, remove the disputed record from `findings.json`, keep its ledger unit as an unresolved candidate, and set `run_status: "incomplete"` with an exact `incomplete_reason`. Non-material wording or repository-line corrections may be applied directly when they do not change meaning or evidence.
+より強い判定への昇格（confirmed への昇格を含む）、または根本原因、trace、実行入力・観測結果、実証影響、深刻度の重要な変更は、そのまま最終適用しません。探索、第3段階、置換提案のいずれにも参加していない新しい独立担当へ置換全体を渡します。現ソースを再確認し、決定的ローカル結果を実行境界内で独立再現して verified または別置換を返します。重要置換はその新検証後だけ適用し、さらに重要置換が出れば新担当で繰り返します。予算・独立性を確保できなければ disputed record を findings から除き、台帳は未解決 candidate に保ち、正確な incomplete_reason で未完了にします。意味・証拠を変えない表現・行位置修正は直接適用できます。
 
-After every applied replacement, rerun both validators and update linked ledger decisions. If a final verifier identifies a separate root cause, assign a new fingerprint and send it through independent candidate validation before inclusion. Set `run_status: "complete"` only when every ledger candidate has an independent final disposition and every retained record passes Phase 5.
+置換適用後は毎回両検証器を再実行し、関連台帳判定を更新します。別根本原因は新 fingerprint を与え、独立した候補検証を通してから追加します。全台帳 candidate に独立最終判定があり、保持記録すべてが第5段階を通る場合だけ complete にします。
 
-Do not verify only `confirmed` records. A misleading `needs_validation` handoff wastes owner time and can preserve a false premise.
+confirmed だけの検証は禁止です。誤った needs_validation は所有者の時間を浪費し、偽の前提を残します。
 
-### Phase 6: Produce target-neutral reports from final records
+### 第6段階：最終記録から対象環境に依存しない報告を作る
 
-Only after Phase 5 passes for every record retained in `findings.json`, derive prose from the final records, the ledger, and the hunter `hardening` notes retained in ledger bookkeeping. An incomplete run may report independently verified records, but it must identify each unresolved ledger candidate and must not present it as a finding. The prose files never change a verdict, severity, blocker, or demonstrated impact.
+findings に残す全記録が第5段階を通った後だけ、記録、台帳、管理項目に保持した hardening から文章を作ります。未完了でも独立検証済み記録は報告できますが、未解決の台帳 candidate をすべて特定し、指摘として扱いません。文章で判定、深刻度、阻害、実証影響を変えません。
 
 #### `REPORT.md`
 
-Write:
+次を記載します。
 
-1. Run profile, scope, budget (if set) with agents spent versus planned, source ref, sandboxed source-and-local-only execution statement, prior-run use, and explicit deferred and out-of-scope coverage. Name carried same-source confirmations and changed-source revalidations. A `quick`, scoped, budget-limited, or incomplete run states plainly that it is a partial pass. If candidate validation exhausted a strict budget, state that the run is incomplete and list every unvalidated fingerprint and linked unit; do not describe those candidates as findings. If the budget prevented a mandatory critic, state which critic did not run and make no clean-coverage claim.
-2. One short security posture summary.
-3. A confirmed-findings table: severity, title, affected boundary, and one-line observed result.
-4. Each confirmed finding: repository source location, lower-trust principal, target-native bounded reproduction, conditions, actual result, impact, priority rationale, and smallest source fix.
-5. A separate `NEEDS VALIDATION` table. Give each lead's title, repository trace, exact blocker, bounded local next step, and safe owner-observed deployment check. Do not assign severity or call it a confirmed vulnerability.
-6. Separate hardening notes and positive source patterns.
-7. Coverage summary from the ledger: covered, candidate, blocked, and deferred counts, plus important exclusions and the final critic result.
+1. profile、scope、予算と使用／予定回数、source ref、sandbox 内のソース・ローカル限定の実行方針、過去結果の利用、延期・範囲外を明記。同一ソース confirmed の引継ぎと変更ソース再検証も示します。quick、部分、予算制限、未完了は部分監査と明記します。検証予算切れなら未完了と全未検証 fingerprint・単位を列挙し、指摘とは呼びません。必須レビューが未実行ならどれか示し、網羅完了を主張しません。
+2. 短いセキュリティ状態の要約。
+3. 確認済み表：深刻度、題名、影響境界、1行の観測結果。
+4. 各 confirmed：相対ソース位置、低信頼主体、対象固有の限定再現、条件、実結果、影響、優先度根拠、最小修正。
+5. 独立した **追加検証が必要（NEEDS VALIDATION）** 表：題名、相対経路、正確な阻害、限定ローカルの次手順、安全な所有者観測。深刻度を付けず確認済み脆弱性と呼びません。
+6. 強化提案と、ソース上の良い実装を別記。
+7. 台帳由来の covered、candidate、blocked、deferred 件数、重要な除外、最終網羅性レビュー結果。
 
-Do not describe rejected records as findings. Mention their fingerprints only when they explain a prior disagreement or coverage decision.
+rejected を指摘にしません。過去の相違や範囲判断の説明に必要な場合だけ fingerprint に言及します。
 
 #### `FINDINGS-DETAIL.md`
 
-For each confirmed `medium`, `high`, or `critical` record, copy the complete source path and target-neutral local reproduction:
+medium・high・critical の各 confirmed について、完全なソース経路と対象固有のローカル再現を転記します。
 
-- ordered repository-relative trace and evidence;
-- dummy attacker/principal and affected dummy resource;
-- native input, invocation, or fixture and exact bounded instructions;
-- observed output and the security invariant it proves;
-- conditions and containment;
-- source-level remediation and regression case.
+- 順序付き相対 trace・evidence
+- ダミー攻撃者・主体と影響ダミー資源
+- native 入力・呼出し・fixture と正確で限定した手順
+- 観測出力と証明する安全上の不変条件
+- 条件と封じ込め
+- ソース修正と回帰ケース
 
 #### `NEEDS-VALIDATION.md`
 
-For every unresolved record, copy the source trace, verified evidence, exact blocker, affected boundary, and each applicable bounded local or owner-observed resolution plan. Keep these as prioritized leads without severity. Do not turn them into live test guidance or assume the missing deployment fact.
+未解決記録ごとに、ソース経路、検証済み証拠、正確な阻害、影響境界、該当する限定ローカル・所有者観測計画を転記します。深刻度なしの優先付けした候補とし、稼働環境への試験案内に変えたり、不明な配備事実を仮定したりしません。
 
-HTTP is one possible native interface, not the default. A library finding may use a function call, a parser a fixture, a CLI a command, a desktop app an IPC or file action, and infrastructure a locally rendered policy. Do not require an endpoint, external account, or live environment that the target does not have.
+HTTP はインターフェースの一例で、既定ではありません。library は関数、parser は fixture、CLI は command、desktop は IPC・file、infrastructure はローカル生成 policy を使えます。対象にない endpoint、外部 account、稼働環境を要求しません。
 
-Keep the report proportional to the evidence. A clean run may have zero confirmed records. State that result and the remaining coverage/validation limits without inventing LOW findings.
+報告の大きさは証拠に合わせます。confirmed 0件でも構いません。残る調査範囲・検証の限界とその結果を示し、LOW の指摘を作り出しません。

@@ -1,78 +1,78 @@
-# Resource Exhaustion and Availability Hunting
+# 資源枯渇・可用性の脆弱性探索
 
-#### When to use this file
+#### このファイルを使う場面
 
-Reach for this file when untrusted requests, messages, files, tenant state, or agent work can consume CPU, memory, disk, connections, worker slots, paid APIs, or queue capacity, or can deadlock/crash a shared service. This domain distinguishes a source-reviewable availability vulnerability from a general performance issue. Never validate by stressing a shared or live service.
+非信頼の要求、メッセージ、ファイル、テナント状態、エージェント処理が CPU、メモリ、ディスク、接続、ワーカー、有料 API、キューを消費する、または共有サービスを停止・デッドロックさせる場合に使います。ソースから評価できる可用性の脆弱性と一般的な性能問題を分けます。共有・稼働中サービスに負荷をかけて検証してはいけません。
 
-Use `MEMORY-SAFETY-AND-BINARY.md` for memory-integrity defects and `PROTOCOLS-RPC-AND-MESSAGING.md` for broker delivery logic. A reachable fatal error belongs here for shared impact even when the underlying parser is covered elsewhere.
+メモリ完全性は `MEMORY-SAFETY-AND-BINARY.md`、ブローカーの配送は `PROTOCOLS-RPC-AND-MESSAGING.md` を使います。到達可能な致命的エラーの共有影響は、元のパーサーを別分野で扱っていても本書の対象です。
 
-## Core discipline (include in every agent prompt for this domain)
+## Core discipline（基本原則：この分野の各エージェントへのプロンプトに含める）
 
+```text
+- 入力→コストの経路、実効的な制限の欠落、他人・共有サービス・安全機能・運用費への影響が必要。依頼者自身のプロセス内で自己完結する処理はサービスの脆弱性ではない。
+- レート制限欠落だけでは不十分。本文・メッセージ・ファイル、並行数、キュー、期限、DB 制約、上流ゲートウェイ、テナント別クォータを確認する。
+- ストレス、飽和、本番テストは禁止。計算量解析、小さい境界フィクスチャ、有料呼出しのモック、厳しいローカル制限、決定的な取消テストを使う。
+- 攻撃者コスト、サービス作業、持続性、範囲、回復を示す。1つの有限入力による超線形・持続的な共有影響と、大量の継続入力を区別する。
+- 安全に実証したソース上の制限不備だけを `confirmed` にする。上流制限、構成、自動拡張、有料枠、復旧がリポジトリ外なら `needs_validation` にする。
 ```
-- Require an input-to-cost path, a missing effective bound, and impact on another user, shared service, safety function, or operator-owned spend. Self-limiting work in the requester's own process is not a service vulnerability.
-- A missing rate limit is not enough. Check body/message/file caps, concurrency, queues, deadlines, database constraints, upstream gateways, and per-tenant quotas before calling a path unbounded.
-- Do not run stress, saturation, or production tests. Use asymptotic analysis, small boundary fixtures, mocked paid calls, strict local resource limits, and deterministic cancellation tests.
-- State attacker cost, service work, persistence, scope, and recovery. One bounded input with superlinear or persistent shared effect is materially different from sustained volume.
-- Use `confirmed` for source-visible bounds failures demonstrated safely. Use `needs_validation` when upstream caps, deployed topology, autoscaling, paid quota, or recovery behavior is outside the repository.
-```
 
-## Computational amplification attack classes (subagent_type: `general`)
+## 計算量増幅の分類（subagent_type: `general`）
 
-**Superlinear parsing, matching, or evaluation**
-Small accepted input drives catastrophic regex backtracking, nested parsing, recursive validation, symbolic evaluation, graph traversal, template expansion, or adversarial sort/hash behavior. Derive accepted depth/cardinality and complexity, then demonstrate a bounded growth curve locally.
+**Superlinear parsing, matching, or evaluation**（超線形の解析・照合・評価）
+小さな入力が正規表現の破滅的バックトラック、入れ子解析、再帰検証、記号評価、グラフ走査、テンプレート展開、偏った sort/hash を起こさないか調べます。受理する深さ・件数と計算量を導き、限定した成長曲線をローカルで示します。
 
-**Decompression and representation amplification**
-Compressed, sparse, nested, aliased, or encoded input expands far beyond the checked transfer or file size. Verify limits after every expansion and across parser stages, including archives, images, fonts, structured documents, and protocol compression tables.
+**Decompression and representation amplification**（展開・表現の増幅）
+圧縮、疎、入れ子、別名参照、符号化された入力が、検査済み通信量・ファイルサイズを大きく超えて展開されないか確認します。アーカイブ、画像、フォント、構造化文書、通信圧縮テーブルの各展開後・段階間で制限を確認します。
 
-**Database and downstream query amplification**
-A small request creates broad scans, pathological joins, fan-out, unbounded sort/aggregation, or many downstream calls because query depth, filter cardinality, pagination, or expansion fields are not bounded. Confirm authorization does not intentionally permit the same resource scope.
+**Database and downstream query amplification**（DB・後段クエリの増幅）
+深さ、条件数、ページング、展開項目の制限不足で、広い走査、複雑な結合、fan-out、無制限の sort／集計、多数の後段呼出しが生じないか確認します。同じ資源範囲を認可が意図的に許していないか確認します。
 
-## Resource accumulation attack classes (subagent_type: `general`)
+## 資源蓄積の分類（subagent_type: `general`）
 
-**Unbounded buffering and cardinality**
-Bodies, out-of-order streams, uploads, sessions, unique cache keys, metrics labels, log fields, subscriptions, or pending jobs accumulate without per-item and aggregate limits. Find cleanup and expiration on disconnect, timeout, cancellation, and partial parse.
+**Unbounded buffering and cardinality**（無制限バッファー・件数）
+本文、順序外 stream、アップロード、セッション、一意キー、メトリクスラベル、ログ項目、購読、保留ジョブに個別・総量制限があるか確認します。切断、期限、取消、部分解析の削除を探します。
 
-**File descriptor, handle, and temporary-resource leaks**
-Malformed or canceled work misses cleanup and retains sockets, files, database cursors, timers, subprocesses, temporary files, or object references. Confirm the leak repeats through bounded local iterations and affects a shared pool.
+**File descriptor, handle, and temporary-resource leaks**（descriptor・handle・一時資源のリーク）
+不正・取消処理でソケット、ファイル、DB カーソル、タイマー、子プロセス、一時ファイル、参照が残らないか調べます。少数のローカル反復で再現し、共有プールへの影響を確認します。
 
-**Detached work after cancellation**
-Client timeout, disconnect, canceled job, or failed authorization returns control but leaves database, model, network, or worker work running. Trace cancellation and deadline propagation through every layer.
+**Detached work after cancellation**（取り消し後に残る処理）
+タイムアウト、切断、取消、認可失敗後に、DB、モデル、通信、ワーカーが残らないか調べます。全層への取消・期限伝播を追います。
 
-## Quota and scheduling attack classes (subagent_type: `general`)
+## クォータ・スケジュールの分類（subagent_type: `general`）
 
-**Pre-authentication work imbalance**
-Expensive parsing, key lookup, cryptography, decompression, or external requests happen before authentication and the earliest size/rate gate. Compare minimal requester effort to shared service cost and check upstream limits.
+**Pre-authentication work imbalance**（認証前の作業量の不均衡）
+認証と最初のサイズ・レート制限より前の、高コスト解析、鍵検索、暗号、展開、外部要求を調べます。攻撃者の最小作業と共有コストを比較し、上流制限も確認します。
 
-**Quota-accounting scope and reset gaps**
-Accounting uses attacker-influenceable IP, route, tenant, key prefix, task ID, or other dimension, allowing one principal's work to escape its intended budget or consume another principal's allocation. Review integer overflow, distributed races, retries, reconnects, and account switching.
+**Quota-accounting scope and reset gaps**（クォータ計数の範囲・リセットの不足）
+攻撃者が変えられる IP、経路、テナント、キー接頭辞、タスク ID などで予算を逃れたり他人の枠を使ったりしないか調べます。整数あふれ、分散競合、再試行、再接続、アカウント切替を確認します。
 
-**Worker, pool, and priority starvation**
-Low-priority or attacker-controlled jobs hold shared locks, workers, database pools, event-loop turns, or scheduler priority needed by unrelated users. Require a path that bypasses queue/concurrency fairness or retains a slot beyond its deadline.
+**Worker, pool, and priority starvation**（ワーカー・プール・優先度の飢餓）
+低優先度・攻撃者のジョブが、他人に必要なロック、ワーカー、DB プール、イベントループ、優先度を占有しないか確認します。公平なキュー・並行数制御の回避、または期限を越える占有経路が必要です。
 
-## Failure and recovery attack classes (subagent_type: `general`)
+## 障害・復旧の分類（subagent_type: `general`）
 
-**Reachable fatal error or deadlock**
-An untrusted input reaches `panic`, abort, fatal assertion, unhandled exception, process exit, lock cycle, or infinite loop in a shared process. Confirm supervisor scope and whether one worker or the whole service becomes unavailable. A restarted isolated worker may reduce impact but does not erase the defect.
+**Reachable fatal error or deadlock**（到達可能な致命的エラー・デッドロック）
+入力が共有プロセスの `panic`、abort、致命的 assert、未処理例外、exit、ロック循環、無限ループに届かないか調べます。監視・再起動単位とワーカー単体／全体の停止を確認します。隔離ワーカーの再起動は影響を下げても欠陥自体を消しません。
 
-**Retry storm and fail-open amplification**
-Timeouts, dependency errors, partially processed messages, or health-check failures trigger synchronized or unbounded retries without jitter, ceilings, circuit breaking, or deduplication. Verify one bounded failure source can create persistent aggregate work.
+**Retry storm and fail-open amplification**（再試行の嵐・障害時許可による増幅）
+期限、依存エラー、部分メッセージ、health 失敗が、jitter、上限、circuit breaker、重複排除なしに同期・無制限の再試行を生まないか確認します。1つの限定された失敗から持続的な総作業が生じることを示します。
 
-**Poison-record and head-of-line blocking**
-One malformed record or message repeatedly fails at the front of a shared queue, partition, startup scan, migration, or recovery loop. Review skip/quarantine policy, offsets, and whether other tenants share the blocked unit.
+**Poison-record and head-of-line blocking**（不正記録による先頭詰まり）
+1件の不正記録が共有キュー、partition、起動走査、移行、回復ループの先頭で失敗を繰り返さないか調べます。スキップ・隔離、offset、他テナントとの共有を確認します。
 
-**Unsafe recovery and capacity rollback**
-A restart, restore, fallback, or cleanup path rebuilds unbounded state, ignores current quotas, or restores the input that immediately repeats failure. Recovery correctness is part of availability.
+**Unsafe recovery and capacity rollback**（安全でない復旧・容量の巻き戻し）
+再起動、復元、代替、掃除が無制限の状態を再構築し、現在のクォータを無視し、直後に再失敗する入力を戻さないか調べます。復旧の正しさも可用性の一部です。
 
-## Universal moves (apply across the above)
+## Universal moves（共通の調べ方）
 
-- Build an input-to-resource table: earliest accepted size/cardinality, work before auth, downstream fan-out, persistence, shared pool, limit and cleanup owner, recovery.
-- Compare aggregate limits with per-object limits. Ten thousand valid one-byte items may evade a per-message cap while exhausting tenant-wide or process-wide state.
-- Validate only in an isolated fixture with strict CPU/memory/time limits and small growth points. Mock external and paid calls and stop once the missing bound or cancellation is observable.
+- 最初のサイズ・件数、認証前作業、後段 fan-out、持続性、共有プール、制限・削除担当、復旧を入力→資源の表にします。
+- 個別と総量の制限を比較します。正しい1バイト項目1万件でも、メッセージ上限を逃れて全体状態を枯渇させ得ます。
+- 厳しい CPU・メモリ・時間制限と少数の測定点を使う隔離フィクスチャだけで検証します。外部・有料呼出しをモックし、制限・取消の欠落が見えたら止めます。
 
-## Validation rules (apply before reporting ANY finding here)
+## Validation rules（検証ルール：報告前にすべて適用）
 
-1. Name untrusted input, requester work, service amplification or retained resource, shared blast radius, and recovery. Missing limits without concrete shared impact are hardening.
-2. Confirm no source-visible upstream, parser, queue, tenant, or framework bound prevents the path. Unknown deployed controls require `needs_validation`.
-3. For superlinear behavior, establish the accepted complexity and bounded local growth. For leaks, show repeatable retention after cleanup should occur. For fatal paths, identify process/supervisor isolation.
-4. Prioritize by low requester work, unauthenticated reachability, cross-tenant scope, persistence, and poor recovery; do not validate with availability impact.
-5. Return `confirmed` only with safe local proof and meaningful shared effect. Return `needs_validation` with the exact upstream limit, topology, quota, or recovery observation an owner must check.
+1. 入力、攻撃者作業、サービス増幅・保持資源、共有影響範囲、復旧を示します。具体的共有影響のない制限欠落は強化提案です。
+2. ソース上の上流、パーサー、キュー、テナント、フレームワーク制限で止まらないか確認します。不明なデプロイ制御は `needs_validation` です。
+3. 超線形は受理計算量と限定した成長、リークは削除時点後の繰り返し保持、致命的経路はプロセス・監視の隔離を示します。
+4. 攻撃者作業の少なさ、未認証到達、テナント間範囲、持続性、復旧の弱さで優先付けし、可用性を損なう検証はしません。
+5. 安全なローカル証拠と意味ある共有影響だけを `confirmed` にします。`needs_validation` は所有者が確認すべき上流制限、構成、クォータ、復旧観測を示します。

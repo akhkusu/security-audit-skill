@@ -1,81 +1,81 @@
-# Protocols, RPC, and Messaging Hunting
+# プロトコル・RPC・メッセージングの脆弱性探索
 
-#### When to use this file
+#### このファイルを使う場面
 
-Reach for this file when the target uses gRPC, GraphQL transports, Cap'n Proto, Thrift, Protobuf, custom binary protocols, streaming RPC, webhooks, brokers, queues, pub/sub, or event buses. It covers peer identity, logical message interpretation, routing, replay, ordering, and delivery semantics. Use `MEMORY-SAFETY-AND-BINARY.md` for parser memory safety, `WEB-PROTOCOL-AND-AUTH.md` for HTTP framing, and `RESOURCE-EXHAUSTION-AND-AVAILABILITY.md` for availability impact.
+gRPC、GraphQL の通信層、Cap'n Proto、Thrift、Protobuf、独自バイナリプロトコル、ストリーミング RPC、Webhook、ブローカー、キュー、pub/sub、イベントバスに使います。相手の ID、メッセージの意味、配送先、再送、順序、配送保証を扱います。パーサーのメモリは `MEMORY-SAFETY-AND-BINARY.md`、HTTP の境界は `WEB-PROTOCOL-AND-AUTH.md`、可用性は `RESOURCE-EXHAUSTION-AND-AVAILABILITY.md` を使います。
 
-Split large systems by producer/consumer pair, external/internal peer role, synchronous RPC, streaming, and asynchronous message path.
+大きな対象は送信・受信の組、外部・内部の役割、同期 RPC、ストリーミング、非同期経路に分けます。
 
-## Core discipline (include in every agent prompt for this domain)
+## Core discipline（基本原則：この分野の各エージェントへのプロンプトに含める）
 
+```text
+- 「内部」は認証ではない。各段の相手 ID と、認可に使うアプリ主体への変換を示す。
+- スキーマ検証は形を証明するだけで、出所、資源権限、順序、値の安全性は証明しない。復号した項目をポリシーと副作用まで追う。
+- ブローカーとアプリの保証は違う。再試行、順序、受領確認、重複排除、トランザクションを書き出してから状態変更を評価する。
+- パーサー不一致には、2つの具体的な受取側・スキーマ版・通信表現と、重要な値の差が必要。
+- 完全なソース経路と限定したローカル送受信検証には `confirmed` を使う。外部のブローカー ACL、メッシュ ID、トピック適用、互換動作は `needs_validation` にする。
 ```
-- "Internal" is not authentication. Name the peer identity at every hop and show how it becomes the application principal used for authorization.
-- Schema validation proves message shape, not provenance, resource authority, ordering, or safe values. Follow decoded fields to policy and side effects.
-- Broker guarantees and application guarantees differ. Write down retry, ordering, acknowledgement, deduplication, and transaction behavior before evaluating state changes.
-- Parser disagreement requires two concrete consumers, schema versions, or wire representations and one security-relevant divergent value.
-- Use `confirmed` for source-complete paths plus bounded local producer/consumer tests. Use `needs_validation` for broker ACL, service-mesh identity, topic attachment, or compatibility behavior outside the repository.
-```
 
-## Framing, schema, and interpretation attack classes (subagent_type: `general`)
+## メッセージ境界・スキーマ・解釈の分類（subagent_type: `general`）
 
-**Message boundary and canonicalization disagreement**
-Components disagree on length, compression, duplicate fields, unknown fields, encoding, numeric width, normalization, or envelope/body precedence. Compare generated and custom parsers, gateways, language bindings, and version converters. Confirm which principal, resource, or operation differs after decoding.
+**Message boundary and canonicalization disagreement**（メッセージ境界・正規化の不一致）
+長さ、圧縮、重複・未知の項目、符号化、数値幅、正規化、外包／本文の優先度を比較します。生成・独自パーサー、ゲートウェイ、言語バインディング、版変換で、復号後の主体、資源、操作の差を確認します。
 
-**Union, enum, and default confusion**
-Unknown variants, missing discriminators, zero values, default privileges, or compatibility mappings reach code that assumes a validated case. Review exhaustive dispatch, default branches, and how old consumers interpret newly added fields.
+**Union, enum, and default confusion**（union・enum・既定値の混同）
+未知の種類、欠落した判別子、ゼロ値、既定権限、互換変換が検証済み前提のコードに届かないか調べます。網羅的な振り分け、default、旧受取側の新項目解釈を確認します。
 
-**Envelope and payload identity mismatch**
-Authorization uses trusted-looking routing or envelope metadata while the handler acts on a conflicting tenant, account, subject, object, or sender in the body. Identify which source is authoritative and ensure clients cannot override it.
+**Envelope and payload identity mismatch**（外包と本文の ID 不一致）
+認可は信頼できそうな配送・外包メタデータを使うのに、処理は本文の異なるテナント、アカウント、subject、オブジェクト、送信者を使わないか調べます。正とする情報源と、クライアントが上書きできないことを確認します。
 
-## RPC identity and authorization attack classes (subagent_type: `general`)
+## RPC の ID・認可の分類（subagent_type: `general`）
 
-**Interceptor and method-path inconsistency**
-An authn/authz interceptor applies to unary methods but not streams, reflection, health, gateway-transcoded paths, compatibility services, or individual stream messages. Compare every registration and route to the same operation.
+**Interceptor and method-path inconsistency**（インターセプター・メソッド経路の不一致）
+単項メソッドにはある認証・認可が、ストリーム、reflection、health、ゲートウェイ変換、互換サービス、個別メッセージで抜けないか調べます。同じ操作への全登録・経路を比較します。
 
-**Peer identity to application-principal confusion**
-mTLS, workload identity, bearer metadata, forwarded identity, or broker credentials authenticate a channel, but a caller-controlled field selects the user or tenant. The channel identity and claimed principal must be bound by deterministic policy.
+**Peer identity to application-principal confusion**（相手 ID とアプリ主体の混同）
+mTLS、ワークロード ID、bearer メタデータ、転送 ID、ブローカー資格でチャネルを認証しても、呼出元の項目でユーザー・テナントを選べないか確認します。両者を確定的なポリシーで結び付ける必要があります。
 
-**Per-item and streaming authorization gaps**
-A stream, subscription, batch, or bulk message is authorized once, then later items name different resources or continue after role, membership, or token revocation. Re-check where scope can change and bind subscriptions to their original principal.
+**Per-item and streaming authorization gaps**（項目ごと・ストリームの認可不足）
+購読・バッチ・ストリームを最初だけ認可し、後の項目で別資源を指定したり、役割・所属・トークン失効後も継続したりしないか調べます。範囲が変わる場所で再確認し、購読を元の主体へ固定します。
 
-**Callback and reply-correlation confusion**
-Predictable, reused, or cross-tenant correlation IDs let a response, webhook, cancellation, or acknowledgment satisfy another caller's pending operation. Bind each outstanding request to authenticated peer, tenant, operation, and lifecycle.
+**Callback and reply-correlation confusion**（コールバック・応答対応の混同）
+予測・再利用・テナント共通の相関 ID で、別の呼出元の保留操作に応答、Webhook、取消、受領確認を適用できないか調べます。未完了要求を認証済み相手、テナント、操作、寿命へ固定します。
 
-## Broker and queue isolation attack classes (subagent_type: `general`)
+## ブローカー・キュー分離の分類（subagent_type: `general`）
 
-**Topic, routing-key, and subscription scope gaps**
-A publisher or subscriber can select another tenant's topic, wildcard, consumer group, partition, reply queue, or dead-letter route. Check broker-enforced ACLs where visible and application-side namespace construction. Tenant text inside a payload is not isolation.
+**Topic, routing-key, and subscription scope gaps**（トピック・配送キー・購読範囲の不足）
+他テナントのトピック、ワイルドカード、consumer group、partition、返信・デッドレターキューを選べないか調べます。見える範囲のブローカー ACL とアプリの名前空間構築を確認します。本文の tenant 文字列だけでは分離になりません。
 
-**Dead-letter, retry, and diagnostic disclosure**
-Messages routed to dead-letter queues, error topics, tracing, or operator views contain secrets or cross-tenant payloads accessible to a lower-trust consumer. Review policy and redaction at the failure path, not just normal delivery.
+**Dead-letter, retry, and diagnostic disclosure**（デッドレター・再試行・診断の漏えい）
+失敗先のキュー、エラートピック、トレース、運用画面へ秘密や他テナントの本文が入り、低信頼の受信者に見えないか確認します。通常配送だけでなく失敗時のポリシー・秘匿処理を読みます。
 
-**Untrusted producer treated as control plane**
-A message body can declare itself an admin event, provider callback, replication record, or migration instruction without an independently authenticated producer and event type. Verify signatures and source/account/audience binding before privileged handling.
+**Untrusted producer treated as control plane**（非信頼の送信者を制御プレーン扱いする）
+独立した送信者認証とイベント種別の確認なしに、本文が管理イベント、プロバイダー通知、複製、移行指示を自称できないか調べます。特権処理前に署名と発信元／アカウント／audience を確認します。
 
-## Replay, ordering, and transaction attack classes (subagent_type: `general`)
+## 再送・順序・トランザクションの分類（subagent_type: `general`）
 
-**Duplicate delivery and idempotency gaps**
-Retries or redelivery repeat a side effect because deduplication is absent, occurs after mutation, or uses a key that collides across tenants or operations. Confirm the broker's delivery model and the side effect that is not naturally idempotent.
+**Duplicate delivery and idempotency gaps**（重複配送・冪等性の不足）
+重複排除がない、変更後に行う、テナント・操作間でキーが衝突するため副作用が繰り返されないか調べます。配送モデルと、元々冪等ではない副作用を確定します。
 
-**Out-of-order and stale message acceptance**
-Older state, revoked membership, canceled work, or pre-step-up authorization arrives after newer state and overwrites it. Review sequence/version checks, tombstones, partition changes, and restore/replay workflows.
+**Out-of-order and stale message acceptance**（順序違反・古いメッセージの受理）
+古い状態、失効した所属、取消済み作業、追加認証前の権限が新状態を上書きしないか確認します。連番・版、削除標識、partition 変更、復元・再生を調べます。
 
-**Acknowledgment/commit ordering defects**
-Acknowledgment occurs before durable commit and loses security-relevant work, or commit happens before an unreliable acknowledgment and duplicates a mutation. Evaluate transactional outbox/inbox behavior and failure recovery.
+**Acknowledgment/commit ordering defects**（受領確認と commit の順序不備）
+永続 commit 前の ack で重要な処理を失うか、commit 後の不確かな ack で変更を重複しないか確認します。transactional outbox/inbox と障害回復を評価します。
 
-**Partial multi-consumer transitions**
-Several consumers jointly implement one authorization or business transition, but retries and partial failure leave only a subset committed. Identify invariants that must become durable atomically or compensate with current authorization.
+**Partial multi-consumer transitions**（複数受信者での部分的な状態遷移）
+複数受信者が1つの認可・業務遷移を実装し、再試行・部分失敗で一部だけが確定しないか調べます。原子的に永続化すべき不変条件、または現認可による補償処理を特定します。
 
-## Universal moves (apply across the above)
+## Universal moves（共通の調べ方）
 
-- Draw producer → broker/transport → gateway → consumer → storage for each message family. At each hop record authenticated peer, authoritative tenant/resource fields, validation, and side effect.
-- Feed the same small fixture to every in-repo schema version or language binding. Test duplicate, missing, unknown, boundary, replayed, and reordered messages without producing load.
-- Compare normal, retry, dead-letter, replay, migration, reflection, stream, and gateway-transcoded routes. Security policy must survive transport changes.
+- メッセージ種別ごとに送信者 → ブローカー／通信 → ゲートウェイ → 受信者 → 保存を描き、各段の認証相手、正とするテナント・資源、検証、副作用を記録します。
+- 同じ小さいフィクスチャを全スキーマ版・言語バインディングへ渡します。重複、欠落、未知、境界値、再送、並べ替えを負荷を生まない範囲で試します。
+- 通常、再試行、デッドレター、再生、移行、reflection、stream、ゲートウェイ変換でポリシーが維持されるか比較します。
 
-## Validation rules (apply before reporting ANY finding here)
+## Validation rules（検証ルール：報告前にすべて適用）
 
-1. Name the realistic producer or peer, accepted message, authenticated channel identity, affected principal/resource, and unauthorized mutation or disclosure.
-2. For disagreement claims, cite both parsers/consumers and the divergent decoded value. Safe rejection by either side prevents confirmation.
-3. For replay/order claims, establish actual delivery guarantees and reproduce the invariant failure with a bounded local/in-memory transport.
-4. For authorization and isolation, verify all interceptor, broker ACL, gateway, and consumer layers visible in source. External attachments make the candidate `needs_validation`.
-5. Return `confirmed` only with the complete message lifecycle and observed meaningful result. Return `needs_validation` with the exact broker, service identity, route, or delivery fact required.
+1. 現実的な送信者、受理メッセージ、認証済みチャネル ID、影響主体・資源、未許可変更・開示を示します。
+2. 不一致は両パーサー／受信者と復号値の差を引用します。いずれかが安全に拒否するなら確認済みにしません。
+3. 再送・順序は実際の配送保証を確定し、限定したローカル／メモリ内通信で不変条件の破綻を示します。
+4. ソース上の全 interceptor、ACL、ゲートウェイ、受信者を確認します。外部の適用が必要なら `needs_validation` にします。
+5. 全ライフサイクルと意味のある観測結果があるものだけ `confirmed` にします。`needs_validation` は必要なブローカー、サービス ID、経路、配送の事実を明示します。

@@ -1,86 +1,86 @@
-# Cloud and Deployment Hunting
+# クラウド・デプロイの脆弱性探索
 
-#### When to use this file
+#### このファイルを使う場面
 
-Reach for this file when the repository defines cloud identity, infrastructure, containers, Kubernetes, service mesh, serverless functions, edge workers, ingress, object storage, managed services, or environment-specific configuration. This domain asks whether deployed components receive the intended identity, isolation, network reachability, secrets, and policy. Source often expresses intent rather than live fact, so separate source-confirmed defects from deployment validation needs.
+クラウド ID、インフラ、コンテナ、Kubernetes、サービスメッシュ、サーバーレス関数、エッジワーカー、入口経路、オブジェクト保存、マネージドサービス、環境別設定を定義するリポジトリに使います。実際の構成要素に、意図した ID、隔離、到達可能性、秘密、ポリシーが与えられるかを調べます。ソースは稼働状態ではなく意図を表すことも多いため、確認できた欠陥とデプロイ環境での追加検証を分けます。
 
-Use `SUPPLY-CHAIN-AND-RELEASE.md` for build and promotion trust, `WEB-PROTOCOL-AND-AUTH.md` for HTTP proxy semantics, and `DATA-ISOLATION-AND-LIFECYCLE.md` for data-store tenant scope.
+ビルド・昇格は `SUPPLY-CHAIN-AND-RELEASE.md`、HTTP プロキシの解釈は `WEB-PROTOCOL-AND-AUTH.md`、保存データのテナント範囲は `DATA-ISOLATION-AND-LIFECYCLE.md` を使います。
 
-## Core discipline (include in every agent prompt for this domain)
+## Core discipline（基本原則：この分野の各エージェントへのプロンプトに含める）
 
+```text
+- マニフェストだけから稼働環境の露出を推測しない。利用環境、既定値・上書き設定、経路が有効かを確定する。
+- ワークロード ID ごとに操作とリソースを対応付ける。広い権限が指摘になるのは、低信頼入力から未許可操作へ届く場合だけ。
+- 入口、プロキシ、メッシュ、メタデータサービス、Admission ポリシーは実際の境界だが、設定と適用先が見える制御だけを数える。
+- 秘密への参照は漏えいではない。低信頼の読み手、出力、成果物、ログ、安全でないフォールバックが必要。
+- 有効なリポジトリ内設定とローカルのレンダリング・ポリシー検証には `confirmed` を使う。アカウントポリシー、ネットワーク適用、実行時 Admission、ホスト側メタデータ、構成ずれは、所有者の観測が必要なら `needs_validation` にする。
 ```
-- Do not infer a live exposure from a manifest alone. Establish which environment consumes it, what defaults or overlays modify it, and whether the source path is active.
-- Map each workload's identity to specific operations and resources. Broad policy is a finding only when lower-trust input can reach an unauthorized action.
-- Ingress, proxies, service mesh, metadata services, and admission policy are real boundaries, but only count a control when its configuration and attachment are visible.
-- Secret references are not secret disclosure. Require a lower-trust reader, output, artifact, log path, or unsafe fallback.
-- Use `confirmed` for active in-repo configurations and local rendering/policy validation. Use `needs_validation` for account policy, network attachment, runtime admission, hosted metadata, or drift that needs owner observation.
-```
 
-## Workload identity and IAM attack classes (subagent_type: `general`)
+## ワークロード ID・IAM の攻撃分類（subagent_type: `general`）
 
-**Workload identity overreach**
-A workload, pod, function, edge worker, or node identity can act on tenants, accounts, resources, or APIs beyond its role, and untrusted request or job input selects that target. Review cloud policy conditions, resource patterns, service-account attachment, namespace mapping, and fallback credentials.
+**Workload identity overreach**（ワークロード ID の権限超過）
+ワークロード、Pod、関数、エッジワーカー、ノードが役割外のテナント、アカウント、リソース、API を扱え、非信頼の要求・ジョブ入力で対象を選べないか調べます。ポリシー条件、リソースパターン、サービスアカウントの割り当て、名前空間対応、代替認証情報を確認します。
 
-**Cross-account or cross-tenant role confusion**
-Role assumption, external IDs, token exchange, workload federation, or resource policies accept identity claims not bound to the intended source account, audience, repository, namespace, or workload. Establish both trust policy and caller-controlled claim.
+**Cross-account or cross-tenant role confusion**（アカウント・テナント間のロール混同）
+ロール引受、External ID、トークン交換、ワークロード連携、リソースポリシーが、元アカウント、audience、リポジトリ、名前空間、ワークロードに結び付かない主張を受け入れないか確認します。信頼ポリシーと攻撃者が制御する主張を両方示します。
 
-**Application authorization delegated to cloud metadata**
-An app trusts caller-supplied identity headers, tags, labels, account IDs, or resource metadata without verifying they came from the cloud control plane or a trusted proxy. Cloud IAM and application authorization are separate checks.
+**Application authorization delegated to cloud metadata**（クラウドメタデータへのアプリ認可の委任）
+呼び出し側の ID ヘッダー、タグ、ラベル、アカウント ID、メタデータを、クラウド制御プレーンや信頼するプロキシ由来と確認せずに信用しないか調べます。IAM とアプリの認可は別の検査です。
 
-## Ingress, network, and control-plane attack classes (subagent_type: `general`)
+## 入口・ネットワーク・制御プレーンの攻撃分類（subagent_type: `general`）
 
-**Unexpected service or management-plane reachability**
-An ingress, service, listener, security group, load-balancer annotation, port mapping, or server bind exposes an admin, debug, metrics, node, control-plane, or internal API to a lower-trust network. Missing network controls alone are `needs_validation`; a repository-controlled public route to a sensitive handler can be `confirmed`.
+**Unexpected service or management-plane reachability**（想定外のサービス・管理系への到達）
+Ingress、Service、リスナー、セキュリティグループ、LB 注釈、ポート割当、bind 設定が、管理・デバッグ・メトリクス・ノード・制御プレーン・内部 API を低信頼ネットワークへ公開しないか調べます。ネットワーク制御の不明・欠落だけなら `needs_validation`、ソース管理された公開経路から機密ハンドラーへ届くなら `confirmed` にできる場合があります。
 
-**Trusted-proxy and mesh identity bypass**
-A backend accepts forwarded identity, mTLS subject, or authorization metadata from peers outside the intended ingress/sidecar, or an alternate port and health/legacy path bypasses the mesh. Verify header stripping, peer reachability, and fail-open behavior when the proxy is absent.
+**Trusted-proxy and mesh identity bypass**（信頼するプロキシ・メッシュ ID の回避）
+意図した入口／サイドカー以外から転送 ID、mTLS subject、認可メタデータを受け入れないか、別ポートやヘルス・互換経路がメッシュを回避しないか確認します。ヘッダー除去、到達可能性、プロキシ不在時の許可側動作を調べます。
 
-**Metadata and internal-service reachability**
-An untrusted URL, destination, or protocol selection reaches instance/container metadata, control-plane sockets, or internal APIs with workload credentials. Trace URL parsing and redirect handling under `ATTACK-CLASSES.md`; here establish deployed network, metadata-version, and identity boundaries.
+**Metadata and internal-service reachability**（メタデータ・内部サービスへの到達）
+非信頼の URL、宛先、プロトコル選択から、ワークロード認証情報を使うインスタンス／コンテナのメタデータ、制御ソケット、内部 API へ届かないか確認します。URL と転送処理は `ATTACK-CLASSES.md`、本書ではデプロイ先のネットワーク、メタデータの版、ID 境界を確定します。
 
-## Container and orchestration attack classes (subagent_type: `general`)
+## コンテナ・オーケストレーションの攻撃分類（subagent_type: `general`）
 
-**Host or control-plane capability exposure**
-A lower-trust workload can select privileged mode, capabilities, host namespaces, host paths, device mounts, container runtime sockets, or service-account tokens that cross into node/control-plane authority. Bare absence of seccomp or read-only filesystem is hardening unless a reachable operation crosses that boundary.
+**Host or control-plane capability exposure**（ホスト・制御プレーン機能の露出）
+低信頼ワークロードが特権モード、capability、ホスト名前空間・パス、デバイス、ランタイムソケット、サービスアカウントトークンを選び、ノード／制御権限へ越境しないか確認します。seccomp や読み取り専用 FS の欠落だけなら、到達可能な越境操作がなければ強化提案です。
 
-**Admission and policy path inconsistency**
-One deployment route enforces image identity, namespace, resource, secret, or privilege policy while another controller, job, upgrade, restore, or compatibility path does not. Confirm the alternate route and resulting deployed object.
+**Admission and policy path inconsistency**（Admission・ポリシー経路の不一致）
+あるデプロイ経路で強制するイメージ ID、名前空間、資源、秘密、権限のポリシーが、別コントローラー、ジョブ、更新、復元、互換経路で抜けないか確認します。代替経路と生成されるオブジェクトを確定します。
 
-**Namespace and label trust confusion**
-Network, admission, secret, or workload-identity policy relies on labels, annotations, names, or namespaces that a less-trusted principal can set. Compare who controls selectors with what authority matching grants.
+**Namespace and label trust confusion**（名前空間・ラベルの信頼混同）
+低信頼主体が設定できるラベル、注釈、名前、名前空間にネットワーク・Admission・秘密・ID のポリシーが依存しないか確認します。選択条件の管理者と、一致で得る権限を比較します。
 
-## Configuration and secret lifecycle attack classes (subagent_type: `general`)
+## 設定・秘密情報のライフサイクル分類（subagent_type: `general`）
 
-**Security-control precedence drift**
-Development values, chart defaults, environment variables, command-line flags, feature gates, sidecar injection, or per-region overlays disable authentication, transport security, tenant scoping, or audit policy in a deployed environment. Render the final configuration for each maintained deployment, not just the base file.
+**Security-control precedence drift**（安全設定の優先順位のずれ）
+開発値、Chart の既定値、環境変数、CLI フラグ、機能ゲート、サイドカー注入、地域別上書きが認証、通信保護、テナント範囲、監査ポリシーを無効化しないか確認します。基本ファイルだけでなく、維持対象の各環境の最終設定を生成します。
 
-**Secret exposure across workload boundaries**
-Secrets enter logs, crash reports, process arguments, shared environment, broad volumes, build outputs, service discovery, or read APIs accessible to another workload or tenant. Check secret type and authority; a public endpoint or key ID is not a credential.
+**Secret exposure across workload boundaries**（ワークロード境界を越える秘密の露出）
+別ワークロード・テナントが読めるログ、クラッシュ情報、プロセス引数、共有環境、広いボリューム、ビルド出力、サービス発見、読み取り API へ秘密が入らないか確認します。公開エンドポイントや鍵 ID は認証情報ではないため、種類と権限を調べます。
 
-**Credential renewal and outage fallback**
-Failure to mount, refresh, rotate, or revoke a workload credential causes stale credentials to remain active or an app to accept a less trusted identity mode. Review startup, readiness, reconnect, and cached-client behavior.
+**Credential renewal and outage fallback**（認証情報の更新失敗・障害時の代替）
+マウント、更新、ローテーション、失効の失敗で古い資格が有効なままになったり、低信頼の ID 方式を受け入れたりしないか確認します。起動、準備完了判定、再接続、クライアントキャッシュを調べます。
 
-## Managed storage, events, and edge attack classes (subagent_type: `general`)
+## マネージド保存・イベント・エッジの攻撃分類（subagent_type: `general`）
 
-**Object and signed-URL policy confusion**
-Bucket/container policy, object keys, CDN origins, or signed URLs fail to bind principal, operation, object namespace, audience, or expiry. Review list/version operations and write paths as well as reads.
+**Object and signed-URL policy confusion**（オブジェクト・署名 URL のポリシー混同）
+バケット／コンテナのポリシー、オブジェクトキー、CDN origin、署名 URL が主体、操作、名前空間、audience、期限に結び付くか確認します。読み取りだけでなく一覧、版、書き込みを調べます。
 
-**Event-source identity confusion**
-A function or worker trusts event body fields as source identity without validating provider-signed envelope, subscription/topic, account, region, and replay state. Compare push, pull, retry, and dead-letter paths.
+**Event-source identity confusion**（イベント発信元の ID 混同）
+関数やワーカーが、署名済み外包、購読／トピック、アカウント、地域、再送状態を確認せず本文を発信元 ID として信頼しないか調べます。push、pull、再試行、デッドレターを比較します。
 
-**Edge/runtime boundary mismatch**
-An edge or serverless runtime assumes a secret, API, filesystem, isolation, or tenant policy that differs from the origin runtime, and fallback to origin changes authority or cache behavior. Confirm which configuration selects each path.
+**Edge/runtime boundary mismatch**（エッジ・ランタイムの境界不一致）
+エッジ／サーバーレスが、origin と異なる秘密、API、FS、隔離、テナントポリシーを前提にし、origin へのフォールバックで権限やキャッシュが変わらないか確認します。各経路を選ぶ設定を特定します。
 
-## Universal moves (apply across the above)
+## Universal moves（共通の調べ方）
 
-- Render every maintained environment and make a matrix of external port, workload identity, network peers, mounted secrets, and cloud resources. Differences require an owner or policy explanation.
-- Follow a lower-trust request, object, label, or event into cloud policy. Show which workload credential performs the final operation and what condition should scope it.
-- Diff normal deploy, migration, restore, node maintenance, failover, and local/emulator paths. Review behavior when mesh, admission, identity, secret, or policy service is unavailable.
+- 各環境の設定を生成し、外部ポート、ワークロード ID、通信相手、マウント秘密、クラウド資源の表を作ります。差分には所有者かポリシー上の説明が必要です。
+- 低信頼の要求、オブジェクト、ラベル、イベントをポリシーまで追い、最終操作の認証情報と範囲を制限すべき条件を示します。
+- 通常デプロイ、移行、復元、ノード保守、障害切り替え、ローカル／エミュレーターを比較します。メッシュ、Admission、ID、秘密、ポリシーのサービス停止時も調べます。
 
-## Validation rules (apply before reporting ANY finding here)
+## Validation rules（検証ルール：報告前にすべて適用）
 
-1. Establish the active source path and effective deployment object; otherwise use `needs_validation` and state which rendered manifest or owner-observed attachment is missing.
-2. Name the lower-trust caller/workload, cloud or application identity, controllable selector, affected resource, and unauthorized operation or disclosure.
-3. Verify provider and orchestrator defaults at the pinned version. Do not assume a public IP, reachable metadata service, permissive firewall, or absent admission attachment.
-4. Local validation may render templates, evaluate policy, inspect container/user namespaces in an isolated fixture, or run an emulator with dummy identities. Do not probe live endpoints or alter shared cloud resources.
-5. Return `confirmed` only with a complete active source trace and concrete boundary result. Return `needs_validation` with the exact deployed policy, identity attachment, overlay, network, or drift observation needed.
+1. 有効なソース経路と実効デプロイオブジェクトを確定します。不明なら `needs_validation` とし、必要な生成マニフェストや適用先の所有者観測を示します。
+2. 低信頼の呼び出し元／ワークロード、クラウド／アプリ ID、操作できる選択値、影響資源、未許可操作・漏えいを示します。
+3. 固定バージョンのプロバイダー・オーケストレーターの既定値を確認します。公開 IP、メタデータ到達、緩いファイアウォール、Admission 未適用を推測しません。
+4. ローカルではテンプレート生成、ポリシー評価、隔離フィクスチャ内の名前空間検査、ダミー ID のエミュレーターを使えます。稼働先への探査や共有クラウド資源の変更は禁止です。
+5. 有効なソース経路全体と具体的な境界結果があるものだけ `confirmed` にします。`needs_validation` は必要なデプロイ済みポリシー、ID 適用、上書き、ネットワーク、構成ずれの観測を明示します。

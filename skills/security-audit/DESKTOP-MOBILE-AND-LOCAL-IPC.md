@@ -1,89 +1,89 @@
-# Desktop, Mobile, and Local IPC Hunting
+# デスクトップ・モバイル・ローカル IPC の脆弱性探索
 
-#### When to use this file
+#### このファイルを使う場面
 
-Reach for this file when the target is a desktop or mobile app, privileged helper, updater, local daemon, webview host, deep-link handler, browser native-messaging host, or local IPC client/server. Relevant untrusted actors may be a downloaded document, remote web content, another local app, another OS user, a sandboxed process, or a lower-privilege account. State that starting capability instead of treating all local users as equivalent.
+デスクトップ／モバイルアプリ、特権ヘルパー、更新処理、ローカルデーモン、WebView ホスト、ディープリンク、ブラウザーの native messaging、IPC クライアント／サーバーに使います。攻撃者は、ダウンロード文書、遠隔 Web 内容、別アプリ、別 OS ユーザー、サンドボックス内プロセス、低権限アカウントなどです。すべてのローカル利用者を同一視せず、開始時点の能力を明示します。
 
-Use `CLIENT-SIDE.md` for browser-side webview behavior, `MEMORY-SAFETY-AND-BINARY.md` for native memory and loader safety, and `SUPPLY-CHAIN-AND-RELEASE.md` for update authenticity.
+WebView のブラウザー側は `CLIENT-SIDE.md`、メモリとローダーは `MEMORY-SAFETY-AND-BINARY.md`、更新の真正性は `SUPPLY-CHAIN-AND-RELEASE.md` を使います。
 
-## Core discipline (include in every agent prompt for this domain)
+## Core discipline（基本原則：この分野の各エージェントへのプロンプトに含める）
 
+```text
+- 別アプリ、別 OS ユーザー、隔離された子、非信頼文書、遠隔 origin など、現実的な攻撃者を定める。同じアカウント・権限内での自己影響は越境ではない。
+- パス、プロセス名、bundle/package ID、自称送信者は相手認証ではない。OS の相手資格、コード ID、capability ハンドル、保護されたチャネル状態を使う。
+- ブリッジやヘルパーは構文解析後の操作と最終リソースを認可する必要がある。信頼する UI・仲介があっても、攻撃者が影響できる引数は非信頼である。
+- OS サンドボックス、署名、entitlement、権限、キーチェーン ACL、公開コンポーネントのポリシー、確認画面の動作は、版が固定され見えるなら実際の制御として扱う。
+- ソース証拠と限定したローカル／エミュレーター検証には `confirmed` を使う。署名、マニフェスト統合、OS 版、端末ポリシー、インストーラー ACL、パッケージ化が不明なら `needs_validation` にする。
 ```
-- Establish the realistic local or remote-content attacker: another app, another OS user, a sandboxed child, an untrusted document, or a remote origin. Self-harm within the same account and authority is not a boundary violation.
-- Paths, process names, bundle/package IDs, and claimed sender fields are not peer authentication. Use OS peer credentials, code identity, capability handles, or protected channel state.
-- The native bridge or helper must authorize each operation and final resource after parsing. A trusted UI or broker does not make attacker-influenceable arguments trusted.
-- OS sandbox, signing, entitlements, permissions, keychain ACLs, exported-component policy, and prompt behavior are real controls when pinned and visible.
-- Use `confirmed` for source evidence plus bounded local/emulator tests. Use `needs_validation` when signing, manifest merge, OS version, device policy, installer ACL, or packaging is required but not observable.
-```
 
-## Deep-link, callback, and navigation attack classes (subagent_type: `general`)
+## ディープリンク・コールバック・移動の分類（subagent_type: `general`）
 
-**Custom-scheme and deep-link ambiguity**
-Another app or page can invoke a route that mutates state, imports data, completes authentication, or selects an account without a current-session and one-time callback binding. Review URI normalization, duplicate query fields, scheme/host/path matching, exported activity/handler policy, and stale/replayed links.
+**Custom-scheme and deep-link ambiguity**（カスタムスキーム・ディープリンクの曖昧さ）
+現在のセッションと一度限りのコールバックに結び付かない状態変更、取込、認証完了、アカウント選択を別アプリやページから呼べないか調べます。URI 正規化、重複クエリ、scheme/host/path、公開ハンドラー、古い・再送リンクを確認します。
 
-**App and account handoff confusion**
-OAuth, SSO, magic-link, invite, device pairing, passwordless, or payment callbacks return to the wrong installed app, profile, tenant, or pending transaction. Bind state to the initiating app identity, current session, account, provider, operation, and expiry.
+**App and account handoff confusion**（アプリ・アカウント受け渡しの混同）
+OAuth、SSO、マジックリンク、招待、端末ペアリング、パスワードレス、支払いの戻り先が別アプリ、プロファイル、テナント、処理中取引にならないか確認します。開始アプリ ID、セッション、アカウント、プロバイダー、操作、期限に state を固定します。
 
-**File-open and intent authority confusion**
-An associated file, share intent, drag/drop item, pasteboard/clipboard record, notification action, or open-file event triggers a privileged operation without confirming content type, sender trust where applicable, current user intent, and final target.
+**File-open and intent authority confusion**（ファイルを開く操作・Intent の権限混同）
+関連ファイル、共有 Intent、ドラッグ＆ドロップ、クリップボード、通知操作、open-file イベントで、型、必要な送信者信頼、現在の意図、最終対象を確認せず特権処理が動かないか調べます。
 
-## Webview and native-bridge attack classes (subagent_type: `general`)
+## WebView・ネイティブブリッジの分類（subagent_type: `general`）
 
-**Navigation-origin to bridge confusion**
-Remote or attacker-controlled frames can reach a JavaScript/native bridge intended only for packaged content. Validate origin at call time and after every navigation, redirect, subframe creation, popup, and error/fallback page. URL-prefix checks and initial-load checks are insufficient.
+**Navigation-origin to bridge confusion**（移動先 origin とブリッジの混同）
+同梱内容専用の JavaScript／native ブリッジへ遠隔・攻撃者フレームが届かないか確認します。呼出時と毎回の移動、転送、子フレーム、ポップアップ、エラー／代替ページで origin を検査します。URL 前方一致や初回だけの検査では不十分です。
 
-**Over-broad native bridge capabilities**
-Web content can select arbitrary files, commands, IPC methods, credentials, or system actions through a generic bridge. Check method allowlists, normalized arguments, user/tenant authority, gesture/confirmation requirements, and return-value disclosure.
+**Over-broad native bridge capabilities**（過大なブリッジ機能）
+Web 内容が汎用ブリッジから任意のファイル、コマンド、IPC、秘密、システム操作を選べないか調べます。メソッド許可、正規化引数、ユーザー／テナント権限、操作・確認要件、返り値の漏えいを確認します。
 
-**Webview file and universal access**
-Remote content can read app-local files, privileged custom schemes, or internal origins because file access, universal access, mixed content, debug interfaces, or custom protocol handlers join origins unexpectedly. Missing a restrictive setting without reachable protected content is hardening.
+**Webview file and universal access**（WebView のファイル・universal access）
+ファイルアクセス、universal access、混在内容、デバッグ、独自プロトコルが origin を結合し、遠隔内容からローカルファイル・特権スキーム・内部 origin を読めないか調べます。読める保護内容がない設定不足は強化提案です。
 
-## Local IPC and exported-component attack classes (subagent_type: `general`)
+## ローカル IPC・公開コンポーネントの分類（subagent_type: `general`）
 
-**IPC peer-authentication gaps**
-Unix sockets, named pipes, XPC, Binder, D-Bus, native messaging, RPC, shared memory, or loopback listeners accept a lower-trust peer without checking OS credentials, code identity, sandbox token, or channel ownership. Require a meaningful method or disclosure behind the channel.
+**IPC peer-authentication gaps**（IPC 相手認証の不足）
+Unix ソケット、名前付きパイプ、XPC、Binder、D-Bus、native messaging、RPC、共有メモリ、ループバック接続で、OS 資格、コード ID、サンドボックストークン、チャネル所有権を確認するか調べます。背後に重要な操作・開示があることが必要です。
 
-**Claimed principal versus channel identity**
-The authenticated process/channel belongs to one app or user, but request fields select another user, tenant, profile, or capability. Bind each method and resource to the peer credential rather than a caller-declared identifier.
+**Claimed principal versus channel identity**（自称主体とチャネル ID の不一致）
+認証されたプロセス・チャネルと異なるユーザー、テナント、プロファイル、機能を引数から選べないか確認します。各メソッドと資源を自称 ID ではなく相手の資格へ固定します。
 
-**Exported service, activity, receiver, or provider overreach**
-A mobile component or local automation endpoint is externally invokable and performs an operation intended for the app itself. Review final merged manifests, intent filters, permission/signature level, path grants, and alternate aliases. Manifest status unknown after packaging requires `needs_validation`.
+**Exported service, activity, receiver, or provider overreach**（公開 service・activity・receiver・provider の権限超過）
+外部から呼べるモバイル部品・自動化口がアプリ専用操作を行わないか確認します。最終統合マニフェスト、Intent フィルター、権限／署名レベル、パス許可、別名を調べます。パッケージ後の状態不明は `needs_validation` にします。
 
-**IPC lifecycle and correlation confusion**
-Predictable request IDs, reused handles, stale channels, inherited descriptors, world-writable socket paths, or restart behavior lets one peer answer, cancel, or reuse another peer's operation. Review creation permissions and cleanup of socket files, locks, ports, and shared mappings.
+**IPC lifecycle and correlation confusion**（IPC の寿命・要求対応の混同）
+予測可能 ID、ハンドル再利用、古いチャネル、継承 descriptor、誰でも書けるソケット、再起動で、別の相手の操作への応答・取消・再利用が可能か調べます。ソケット、ロック、ポート、共有マッピングの作成権限と削除を確認します。
 
-## Privileged-helper and local-file attack classes (subagent_type: `general`)
+## 特権ヘルパー・ファイルの分類（subagent_type: `general`）
 
-**Privileged helper as confused deputy**
-A low-privilege caller can select a privileged command, file, service, user, or system setting without per-operation authorization. Review sudo/polkit/UAC/XPC helper rules and ensure the helper independently validates normalized arguments.
+**Privileged helper as confused deputy**（ヘルパーを使う confused deputy）
+低権限の呼出元が操作ごとの認可なしに特権コマンド、ファイル、サービス、ユーザー、設定を選べないか確認します。sudo/polkit/UAC/XPC の規則と、ヘルパー自身による正規化引数の検証を調べます。
 
-**Install, update, and repair path trust**
-A privileged installer/helper reads manifests, scripts, packages, symlinks, working directories, or repair state writable by a lower-trust actor after authorization. Bind authorization to immutable content and safe destination paths.
+**Install, update, and repair path trust**（インストール・更新・修復パスの信頼）
+認可後に低信頼主体が変更できるマニフェスト、スクリプト、パッケージ、リンク、作業ディレクトリ、修復状態を特権処理が読まないか確認します。承認は不変な内容と安全な宛先に固定します。
 
-**Local file ownership and TOCTOU**
-The app checks a file/path then follows replacement, symlink, mount, or case/normalization changes during a privileged read/write. Use descriptor-relative operations and verify final ownership. Focus `MEMORY-SAFETY-AND-BINARY.md` on parsing after the file is opened.
+**Local file ownership and TOCTOU**（ローカルファイルの所有権・TOCTOU）
+検査後の入替、シンボリックリンク、マウント、大文字小文字・正規化の変更を特権読書きが追わないか調べます。descriptor 相対操作と最終所有権の検証を確認します。開いた後の解析は `MEMORY-SAFETY-AND-BINARY.md` を使います。
 
-**Credential-store and local-secret boundary mismatch**
-A keychain/keystore item, token file, backup, log, clipboard, notification preview, or local config is readable by another app/profile/user with less authority. Plaintext readable only by the same intended OS account is not automatically a vulnerability; state the lower-trust reader and credential power.
+**Credential-store and local-secret boundary mismatch**（認証情報ストア・ローカル秘密の境界不一致）
+キーチェーン／キーストア、トークン、バックアップ、ログ、クリップボード、通知プレビュー、設定を別アプリ・プロファイル・ユーザーが読めないか確認します。意図した同じ OS アカウントだけが読める平文は自動的に脆弱性にはなりません。低信頼の読み手と資格の権限を示します。
 
-## Application-state and device-lifecycle attack classes (subagent_type: `general`)
+## アプリ状態・端末ライフサイクルの分類（subagent_type: `general`）
 
-**Account switch, logout, and device restore leakage**
-Cached data, background tasks, widgets, notifications, local databases, webview storage, or biometric approvals survive logout/account change and appear under a later account. Review backup/restore and multi-profile behavior.
+**Account switch, logout, and device restore leakage**（切替・ログアウト・端末復元での漏えい）
+キャッシュ、バックグラウンド処理、ウィジェット、通知、ローカル DB、WebView 保存、生体認証の承認が切替後も残り、次のアカウントに現れないか調べます。バックアップ／復元と複数プロファイルを確認します。
 
-**Pending-action and user-presence confusion**
-Notification, widget, shortcut, share sheet, biometric prompt, or deferred operation authorizes a different action than displayed, executes after expiry, or uses another profile's pending state. Bind confirmation to normalized action, resource, account, and current foreground state.
+**Pending-action and user-presence confusion**（保留操作・本人の立会いの混同）
+通知、ウィジェット、ショートカット、共有画面、生体認証、遅延処理が表示と違う操作を認可したり、期限後・別プロファイルで実行したりしないか調べます。確認を正規化した操作、資源、アカウント、現在の前面状態に固定します。
 
-## Universal moves (apply across the above)
+## Universal moves（共通の調べ方）
 
-- Enumerate every process, app component, local endpoint, URI scheme, file association, webview origin, and helper. Record OS identity, runtime privilege, caller, and callable operation.
-- Read final packaging inputs: merged manifest, entitlements, installer rules, native-messaging registration, protocol handlers, and ACL creation. Source declarations can be overwritten downstream.
-- Validate with dummy profiles and non-sensitive local fixtures on an isolated machine/emulator. Do not interact with other users' apps, credentials, or production services.
+- 全プロセス、部品、ローカル口、URI スキーム、ファイル関連付け、WebView origin、ヘルパーを列挙し、OS ID、実行権限、呼出元、操作を記録します。
+- 統合マニフェスト、entitlement、インストール規則、native messaging 登録、プロトコルハンドラー、ACL 作成など、最終パッケージ入力を読みます。元宣言は後段で上書きされ得ます。
+- 隔離したマシン／エミュレーターとダミープロファイル・非機密フィクスチャで確認します。他人のアプリ、秘密、本番サービスに触れません。
 
-## Validation rules (apply before reporting ANY finding here)
+## Validation rules（検証ルール：報告前にすべて適用）
 
-1. Name the attacker starting capability, OS/app principal crossed, entry channel, accepted argument or state, and unauthorized operation or disclosure.
-2. Confirm OS sandbox, peer credential, signing, entitlement, permission, user-consent, and installer controls that apply. Unknown packaging/runtime facts require `needs_validation`.
-3. For webview bridges, cite both navigation/origin control and privileged native sink. For IPC, cite peer authentication and per-resource authorization. For helpers, verify final normalized destination.
-4. Keep local tests bounded and use dummy content/accounts. Stop after proving the boundary result; do not extend proof into persistence or broader system modification.
-5. Return `confirmed` only with a complete source and local evidence chain. Return `needs_validation` with the exact OS, manifest, signing, ACL, or device-lifecycle fact required.
+1. 攻撃者の初期能力、越える OS／アプリ主体、入口、受理される引数・状態、未許可操作・開示を示します。
+2. OS 隔離、相手資格、署名、entitlement、権限、同意、インストール制御を確認します。未知のパッケージ・実行時事実は `needs_validation` にします。
+3. WebView は移動／origin 制御と native の特権処理、IPC は相手認証と資源認可、ヘルパーは最終正規化宛先を示します。
+4. ローカル検証を制限し、ダミー内容・アカウントを使います。越境結果で止め、永続化や広範なシステム変更に進みません。
+5. ソースとローカル証拠が揃うものだけ `confirmed` にします。`needs_validation` は必要な OS、マニフェスト、署名、ACL、端末状態の事実を明示します。

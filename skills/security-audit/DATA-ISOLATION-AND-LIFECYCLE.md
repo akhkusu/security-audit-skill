@@ -1,84 +1,84 @@
-# Data Isolation and Lifecycle Hunting
+# データ分離・ライフサイクルの脆弱性探索
 
-#### When to use this file
+#### このファイルを使う場面
 
-Reach for this file when the target stores multi-tenant or access-controlled data, derives search/index/cache/analytics copies, issues object links, exports or restores records, migrates schemas, or promises deletion, revocation, and retention behavior. This domain follows one data item through every copy and state transition. Use `ATTACK-CLASSES.md` for endpoint-level access control and `CLOUD-AND-DEPLOYMENT.md` for provider-level storage policy.
+マルチテナントやアクセス制御付きの保存、検索・索引・キャッシュ・分析用の複製、オブジェクトリンク、エクスポート、復元、スキーマ移行、削除・失効・保持の保証を扱う場合に使います。1つのデータを全コピーと状態遷移にわたって追います。エンドポイントの認可は `ATTACK-CLASSES.md`、プロバイダーの保存ポリシーは `CLOUD-AND-DEPLOYMENT.md` を使います。
 
-Split large targets by primary storage, cache/search, object/blob storage, analytics/logging, export/backup, deletion/revocation, and migration.
+大きな対象は、主保存、キャッシュ／検索、オブジェクト／Blob、分析／ログ、出力／バックアップ、削除／失効、移行に分割します。
 
-## Core discipline (include in every agent prompt for this domain)
+## Core discipline（基本原則：この分野の各エージェントへのプロンプトに含める）
 
+```text
+- tenant や owner の属性があるだけでは分離にならない。各読み書きで強制するクエリ、キー、パス、ポリシー、行単位制御を探す。
+- 派生コピーを追う。主データが無害化済みでも、ACL や保持規則の違う検索、キャッシュ、分析、出力、プレビュー、ログ、複製、バックアップでは危険になり得る。
+- 削除・失効はライフサイクルの契約である。製品の保証範囲にある現在・履歴・キャッシュ・索引・出力・復元・キューのコピーを調べる。
+- プライバシーや保持の好みだけで脆弱性としない。明示的なアクセス境界または削除・失効保証と、未許可の読み手または後続操作が必要。
+- ソースで追える完全な系譜と、限定したダミーテナント検証には `confirmed` を使う。外部保存ポリシー、保持、CDN、複製遅延、バックアップ権限が不明なら `needs_validation` にする。
 ```
-- A tenant or owner field on a record is not isolation. Find the query, key, path, policy, or row-level control that enforces it for each read and write path.
-- Trace derived copies. Sanitized primary data can become unsafe in search, cache, analytics, export, previews, logs, replicas, and backups with different ACL and retention rules.
-- Deletion and revocation are lifecycle contracts. Check current, historical, cached, indexed, exported, restored, and queued copies within the product's stated boundary.
-- Privacy or retention preference is not automatically a security vulnerability. Require an explicit data-access boundary or deletion/revocation guarantee and an unauthorized reader or later operation.
-- Use `confirmed` for complete source-visible lineage and bounded dummy-tenant tests. Use `needs_validation` when external storage policy, retention, CDN behavior, replica lag, or backup access is unavailable.
-```
 
-## Tenant and object-isolation attack classes (subagent_type: `general`)
+## テナント・オブジェクト分離の攻撃分類（subagent_type: `general`）
 
-**Missing tenant or owner enforcement**
-A read, update, delete, list, count, or bulk query identifies an object without binding it to the authenticated tenant/owner, or trusts body fields to supply that identity. Compare direct lookup, nested relationship, background, admin, import, and legacy paths.
+**Missing tenant or owner enforcement**（テナント・所有者制約の欠落）
+読取、更新、削除、一覧、件数、一括クエリが認証済みテナント／所有者に結び付かずオブジェクトを指定できないか、本文の ID を信頼しないか確認します。直接取得、入れ子の関係、バックグラウンド、管理、インポート、互換経路を比較します。
 
-**Composite-key and namespace collision**
-Cache keys, object paths, database uniqueness, search document IDs, temporary files, or deduplication keys omit tenant or environment. Two principals can overwrite or retrieve the same logical key even though application records carry separate owners.
+**Composite-key and namespace collision**（複合キー・名前空間の衝突）
+キャッシュキー、保存パス、DB 一意制約、検索文書 ID、一時ファイル、重複排除キーにテナント・環境が抜け、別所有者の記録でも同じ論理キーを上書き・取得できないか調べます。
 
-**Policy and query disagreement**
-Row-level policy, ORM default scopes, authorization filters, and raw/bypass clients apply different predicates. Check joins, aggregates, aliases, views, transactions, `unscoped` or service clients, and error paths where context is missing.
+**Policy and query disagreement**（ポリシー・クエリの不一致）
+行ポリシー、ORM の既定スコープ、認可フィルター、直接／回避クライアントの条件を比較します。結合、集計、別名、ビュー、トランザクション、`unscoped`、サービス用クライアント、コンテキスト欠落時のエラー経路を調べます。
 
-**Blob and signed-reference overreach**
-Object keys, attachment IDs, version IDs, shared links, or signed URLs permit operations or namespaces beyond the issuing principal's access, or remain valid after the underlying ACL changes. Bind operation, exact object/version, audience, expiry, and tenant.
+**Blob and signed-reference overreach**（Blob・署名参照の権限超過）
+オブジェクトキー、添付 ID、版 ID、共有リンク、署名 URL が発行者の権限外の操作・名前空間を許したり、ACL 変更後も有効だったりしないか確認します。操作、正確なオブジェクト／版、audience、期限、テナントを固定します。
 
-## Derived-data and disclosure attack classes (subagent_type: `general`)
+## 派生データ・漏えいの攻撃分類（subagent_type: `general`）
 
-**Search, cache, and index ACL drift**
-A primary record's ACL or lifecycle changes without invalidating a searchable, cached, embedded, thumbnail, RSS, preview, or index copy. Validate filtering at retrieval time as well as document ingestion and invalidation.
+**Search, cache, and index ACL drift**（検索・キャッシュ・索引の ACL のずれ）
+元記録の ACL・状態変更が、検索、キャッシュ、埋め込み、サムネイル、RSS、プレビュー、索引へ反映されるか確認します。取込・無効化だけでなく取得時の絞り込みも検証します。
 
-**Analytics, logs, traces, and diagnostics as alternate readers**
-Private content or credentials are emitted into systems with broader access, longer retention, or tenant mixing. Confirm the data class and realistic reader; field names, public identifiers, and operator-only content under intended policy are not enough.
+**Analytics, logs, traces, and diagnostics as alternate readers**（分析・ログ・トレース・診断による別経路の閲覧）
+私的内容や秘密が、より広いアクセス、長い保持、テナント混在のシステムに出ないか調べます。データ種別と現実的な読み手を確認します。項目名、公開 ID、意図したポリシー内の運用者専用情報だけでは不十分です。
 
-**Enumeration and aggregate oracles**
-Counts, filters, ordering, errors, unique constraints, timings, notification behavior, or existence checks disclose protected object or account state. Require a concrete confidential predicate and observable distinction, not general response variance.
+**Enumeration and aggregate oracles**（列挙・集計による推測）
+件数、絞り込み、順序、エラー、一意制約、時間、通知、存在確認が保護された状態を漏らさないか調べます。一般的な応答差ではなく、具体的な機密条件と観測可能な差が必要です。
 
-## Export, backup, restore, and migration attack classes (subagent_type: `general`)
+## エクスポート・バックアップ・復元・移行の分類（subagent_type: `general`）
 
-**Export and backup scope expansion**
-An export, snapshot, portability package, report, or backup includes other tenants, inaccessible object fields, soft-deleted data, secret values, or history above the requester's access. Check per-item authorization after selection and authorization to download the final artifact.
+**Export and backup scope expansion**（出力・バックアップ範囲の拡大）
+他テナント、閲覧不可の項目、論理削除データ、秘密、権限外の履歴が、出力・スナップショット・可搬パッケージ・報告・バックアップに含まれないか確認します。選択後の各項目認可と成果物ダウンロードの認可を調べます。
 
-**Import and restore authority expansion**
-Restore/import bypasses owner, schema, ACL, uniqueness, or validation rules, overwrites existing resources, or recreates records in a tenant the requester cannot write. Validate archive contents as untrusted and authorize the resulting operation rather than trusting prior provenance.
+**Import and restore authority expansion**（インポート・復元による権限拡大）
+所有者、スキーマ、ACL、一意性、検証を回避し、既存資源や書込不可テナントへ復元できないか確認します。アーカイブは非信頼入力として検証し、過去の出所を信頼せず、結果として行う操作を認可します。
 
-**Migration default and ownership confusion**
-Old records lack tenant/ACL/lifecycle fields, incompatible IDs collide, or partial rollout makes new and old readers apply different defaults. Review backfill, dual-read/write, compatibility, rollback, and resumed-migration paths.
+**Migration default and ownership confusion**（移行時の既定値・所有権の混同）
+古い記録の tenant／ACL／状態属性欠落、非互換 ID の衝突、部分展開による既定値の差を調べます。埋め戻し、二重読書き、互換、巻き戻し、移行再開を確認します。
 
-**Backup and replication boundary drift**
-Encryption keys, storage accounts, cross-region replicas, restoration environments, or support snapshots have broader identity or tenant scope than primary data. Source can confirm only in-repo policy; hosted access and retention require `needs_validation`.
+**Backup and replication boundary drift**（バックアップ・複製の境界のずれ）
+鍵、保存アカウント、地域間複製、復元環境、サポート用スナップショットの ID・テナント範囲が主保存より広くないか確認します。ソースで確認できるのはリポジトリ内ポリシーだけです。ホスト側権限・保持は `needs_validation` にします。
 
-## Deletion, revocation, and lifecycle attack classes (subagent_type: `general`)
+## 削除・失効・状態遷移の攻撃分類（subagent_type: `general`）
 
-**Soft-delete and tombstone bypass**
-Direct lookup, search, relation traversal, object link, background processor, or restore ignores the lifecycle predicate and returns or acts on a deleted/revoked record. Check whether soft-deleted identifiers can be re-registered before all references are gone.
+**Soft-delete and tombstone bypass**（論理削除・削除標識の回避）
+直接取得、検索、関係の走査、リンク、バックグラウンド処理、復元が状態条件を無視して削除・失効記録を返す、または操作しないか調べます。全参照の消滅前に同じ ID を再登録できないか確認します。
 
-**Stale authorization and derived copy use**
-Membership removal, ACL update, consent withdrawal, secret revocation, or role downgrade does not invalidate sessions, caches, subscriptions, jobs, or materialized data that continue to authorize future operations.
+**Stale authorization and derived copy use**（古い認可・派生コピーの利用）
+メンバー削除、ACL 更新、同意撤回、秘密失効、役割降格が、以後も操作を許すセッション、キャッシュ、購読、ジョブ、実体化データを無効化するか確認します。
 
-**Retention and queued-work overrun**
-Deletion completes in primary storage while queued processors, retries, exports, analytics, or generated artifacts recreate or retain the data beyond the promised boundary. Find idempotent deletion and tombstone propagation.
+**Retention and queued-work overrun**（保持・キュー処理の超過）
+主保存の削除後にキュー、再試行、出力、分析、生成物がデータを再作成・保持し、保証範囲を越えないか確認します。冪等な削除と削除標識の伝播を探します。
 
-**Restore reintroduces invalid state**
-Backup, undo, undelete, or replica recovery restores data, credentials, memberships, or permissions that current policy no longer allows. Re-authorize restored state and reapply lifecycle changes made after the snapshot.
+**Restore reintroduces invalid state**（復元による不正状態の再導入）
+バックアップ、元に戻す操作、削除取消、複製復旧が、現ポリシーで禁止されたデータ、資格、メンバー、権限を戻さないか確認します。復元状態を再認可し、スナップショット後の状態変更を再適用します。
 
-## Universal moves (apply across the above)
+## Universal moves（共通の調べ方）
 
-- Pick one protected record and draw primary write, query, cache, index, event, export, backup, deletion, and restore paths. Mark principal and tenant at every edge.
-- Compare two dummy tenants through the same local service methods, then repeat after ACL change, deletion, account switch, and restore. Do not use real user data.
-- Start at bypass clients, background jobs, migrations, global uniqueness, and cache keys. These paths commonly omit request-scoped identity that interactive endpoints carry.
+- 保護された1件を選び、書込、クエリ、キャッシュ、索引、イベント、出力、バックアップ、削除、復元の図を作り、各接続で主体・テナントを記します。
+- 同じローカルサービスのメソッドで2つのダミーテナントを比較し、ACL 変更、削除、アカウント切替、復元後も繰り返します。実ユーザーのデータは使いません。
+- 回避用クライアント、バックグラウンドジョブ、移行、全体の一意制約、キャッシュキーから読みます。対話 API にある要求単位の ID が抜けやすい経路です。
 
-## Validation rules (apply before reporting ANY finding here)
+## Validation rules（検証ルール：報告前にすべて適用）
 
-1. Name attacker or lower-trust principal, protected data/state, affected owner/tenant, alternate copy or operation, and unauthorized disclosure or mutation.
-2. Cite both intended source-of-truth policy and the path that omits or disagrees with it. Confirm another layer does not enforce the same tenant/lifecycle condition.
-3. Use local dummy tenants and non-sensitive fixtures to prove cross-scope access or stale lifecycle behavior. Stop at the minimum observable record or operation.
-4. If external cache, object storage, replicas, analytics, backup, or retention policy is required, classify `needs_validation` and state the owner-observed check.
-5. Return `confirmed` only with complete lineage and concrete boundary impact. Return `needs_validation` with the exact unresolved storage, ACL, invalidation, retention, or restore fact.
+1. 攻撃者／低信頼主体、保護データ・状態、影響所有者／テナント、別コピー・操作、未許可の開示・変更を示します。
+2. 正とするポリシーと、それを省略・矛盾する経路を両方引用します。他の層で同じテナント・状態制約を強制していないか確認します。
+3. ダミーテナントと非機密のローカルフィクスチャで越境・古い状態利用を示し、最小の記録・操作で止めます。
+4. 外部キャッシュ、オブジェクト保存、複製、分析、バックアップ、保持ポリシーが必要なら `needs_validation` とし、所有者の確認を示します。
+5. 完全な系譜と具体的な境界影響があるものだけ `confirmed` にします。`needs_validation` には未確認の保存、ACL、無効化、保持、復元の事実を明記します。

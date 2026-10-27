@@ -1,107 +1,107 @@
-# Reconnaissance
+# 事前調査
 
-### Phase 1: Map the source and plan coverage
+### 第1段階：ソースの全体像を把握し、調査範囲を計画する
 
-The parent initializes `run-metadata.json`, applies the strict pre-reconnaissance budget gate in `SKILL.md`, then creates agent scratch roots and the shared ledger before hunting. If the gate fails, record the incomplete status in metadata and launch no reconnaissance agent. Reconnaissance reads the target and locally available build/configuration state only. It does not contact deployed endpoints, external identity providers, registries, brokers, cloud APIs, or other shared services.
+親エージェントは `run-metadata.json` を初期化し、`SKILL.md` の調査前の厳密な予算判定を行います。その後、探索の前に各担当の一時領域と共有台帳を作成します。予算判定を満たさなければ未完了を記録し、事前調査担当を起動しません。読むのは対象とローカルのビルド・設定状態だけです。配備先、外部 IdP、registry、broker、cloud API、共有サービスへ接続しません。
 
-Launch several `research` agents in parallel. They return structured facts to the parent and do not write files.
+複数の `research` 担当を並列起動します。構造化した事実を親へ返し、ファイルは書きません。
 
-**Agent 1a: Product, stack, and local operation**
-
-```text
-Read the target at <target>. Do not use network access. Return:
-1. Product type, users, operators, and ordinary trust-sensitive actions.
-2. Languages, frameworks, build system, runtimes, and locally visible deployment models.
-3. Repository-relative entry points and subsystem boundaries.
-4. Exact build and test commands that could run offline with local dependencies, their expected write locations, and the target-controlled inputs they process. Do not run them during reconnaissance.
-5. Comparable software or protocol visible from local documentation and dependencies. If no useful comparison is source-grounded, say so.
-6. Missing local toolchains or runtime facts that limit bounded execution.
-Return only source facts with repository-relative file:line references.
-```
-
-**Agent 1b: Principals, authority, and controls**
+**担当 1a：製品・技術構成・ローカル動作**
 
 ```text
-Read all source that establishes identity, authorization, isolation, and privilege. Map:
-1. Each lower-trust principal and the actions it has by design.
-2. Authentication or peer identity at each entry surface.
-3. Per-resource authorization and tenant/owner scope.
-4. Process, browser, workload, CI, plugin, model/tool, device, or local-IPC authority.
-5. Privilege changes, confirmation, revocation, recovery, and fallback paths.
-6. Which controls are source-visible and which depend on an unobserved deployment fact.
-Return trust boundaries and control locations with repository-relative file:line references. Do not infer live reachability.
+<target> を読み、通信せず次を返してください。
+1. 製品の種類、利用者、運用者、通常の信頼に関わる操作。
+2. 言語、framework、build system、runtime、ローカルで見える配備モデル。
+3. リポジトリ相対の入口とサブシステム境界。
+4. 手元の依存だけでオフライン実行できる正確な build/test コマンド、書込先、処理する対象制御入力。事前調査中は実行しないでください。
+5. ローカル文書・依存から根拠を示せる類似ソフトウェア・プロトコル。なければその旨。
+6. 限定実行を妨げる不足 toolchain・runtime 情報。
+リポジトリ相対の file:line 参照を付け、ソース上の事実だけを返してください。
 ```
 
-**Agent 1c: Entry surfaces, copies, and sinks**
+**担当 1b：主体・権限・制御**
 
 ```text
-Inventory every source-visible place external or lower-trust input enters:
-- HTTP/browser, RPC/message/protocol, files/archive/document, CLI/env/config, plugins/dependencies/CI, cloud events/IAM selectors, model context/tool arguments, mobile/deep-link/webview, and local IPC.
-For each surface, follow major transformations, stored or derived copies, and security-relevant sinks. Record source-visible limits and parallel paths to the same effect.
-Return repository-relative paths and line numbers. Be complete, but do not execute or send inputs.
+ID、認可、隔離、特権を確立する全ソースを読み、次を整理してください。
+1. 各低信頼主体と、設計上許される操作。
+2. 各入口の認証・相手 ID。
+3. 資源ごとの認可と tenant/owner 範囲。
+4. process、browser、workload、CI、plugin、model/tool、device、local IPC の権限。
+5. 権限変更、確認、失効、回復、代替経路。
+6. ソースで見える制御と、未観測の配備事実に依存する制御。
+信頼境界と制御箇所をリポジトリ相対 file:line 付きで返してください。稼働先の到達性を推測しないでください。
 ```
 
-**Agent 1d: Local execution and deployment visibility**
+**担当 1c：入口・複製・処理先**
 
 ```text
-Read tests, build definitions, manifests, packaging, and maintained environment overlays. Return:
-1. Small offline tests or existing fixtures that could validate trust boundaries with dummy data inside the required OS-enforced sandbox.
-2. Processes that could use an isolated loopback network namespace without external or shared dependencies.
-3. Commands that would fetch dependencies, publish artifacts, contact paid/provider APIs, or affect shared state; mark them prohibited for this run.
-4. Deployed controls and attachments that source cannot establish and therefore require needs_validation if decisive.
-5. The final active source path for each deployment mode only where the repository selects it deterministically.
-6. Whether the local platform can enforce an empty allowlisted environment, no external network, read-only target/toolchain mounts, scratch-only writes, and explicit CPU, memory, process, file-size, disk, and wall-clock limits. Missing controls block target-controlled execution.
-7. Whether trusted parent-side code can promote predeclared scratch files with path-confined no-follow descriptor traversal, nonblocking regular-file checks, no-follow traversal of every destination parent, exclusive regular-file destination creation, and explicit per-file and cumulative size bounds. Missing promotion controls block use of scratch files as evidence.
+外部・低信頼入力が入るソース上の全箇所を列挙してください。
+- HTTP/browser、RPC/message/protocol、file/archive/document、CLI/env/config、plugin/dependency/CI、cloud event/IAM selector、model context/tool argument、mobile/deep-link/webview、local IPC。
+各入口から主な変換、保存・派生コピー、セキュリティ上重要な処理先を追い、見える制限と同じ効果への並列経路を記録してください。
+相対パスと行番号を返してください。漏れなく調べますが、実行や入力送信はしないでください。
 ```
 
-Add focused reconnaissance agents for materially distinct deployment modes or subsystems that these four do not map. Do not silently omit them: if the budget gate in `SKILL.md` blocks a focused agent, launch nothing for it, seed the unmapped area as a `deferred` ledger unit with reason `budget_cannot_reserve_critics_and_validation`, and disclose the gap in the report.
+**担当 1d：ローカル実行・配備の可視性**
 
-## Prior-run input
+```text
+test、build 定義、manifest、packaging、保守対象の環境別上書きを読み、次を返してください。
+1. 必須 OS サンドボックス内のダミーデータで境界を検証できる、小さいオフライン test・既存 fixture。
+2. 外部・共有依存なしの隔離 loopback namespace で動かせる process。
+3. 依存取得、成果物公開、有料・provider API、共有状態変更を行うコマンド。今回は禁止と明記。
+4. ソースで確定できず、決定的なら needs_validation が必要な配備制御と適用先。
+5. リポジトリが決定的に選ぶ場合だけ、各配備モードの最終有効ソース経路。
+6. ローカル平台で、空から許可変数だけを入れた環境、外部通信禁止、対象・toolchain の読取専用 mount、scratch のみ書込、CPU・memory・process・file size・disk・wall time 制限を強制できるか。不足は対象コード実行の阻害要因。
+7. 信頼する親側コードが、事前指定 scratch ファイルを、パス内に閉じた no-follow descriptor 走査、非 blocking の通常ファイル確認、宛先全親の no-follow 走査、排他的な通常ファイル作成、個別・合計サイズ制限で保存できるか。不足は scratch を証拠として使う際の阻害要因。
+```
 
-Before selecting work, the parent reads every available prior `coverage-ledger.json` and `findings.json` for the same repo:
+4担当で把握できない重要な別配備モード・サブシステムには追加の事前調査を割り当てます。予算で不可能なら省略を隠さず、その領域を `deferred`、理由 `budget_cannot_reserve_critics_and_validation` の単位にし、報告書へ不足を記します。
 
-- Compare the source locations, controls, conditions, and source-derived identity for every prior record and unit against the current source.
-- Carry an unchanged prior `confirmed` record into the current candidate set, with the same fingerprint, only when its relevant source, conditions, and qualifying evidence still apply. Link it to a current `planned` unit with `prior_status: "prior_confirmed_same_source"` and put only that root cause on the hunter exclusion list. The Phase 3 verifier that re-verifies the carried record becomes that unit's assignment owner; its source re-check is the unit's first check and moves the unit to `candidate` with the carried fingerprint.
-- Build a current planned `prior_confirmed_changed_source` revalidation unit when any relevant source or condition changed. Do not exclude that root cause from hunting or assume the prior verdict still applies.
-- Build current work units for every prior `needs_validation`, `deferred`, `blocked`, `out_of_scope`, and changed-source unit. These states are priority input, never deduplication or suppression keys.
-- Carry a still-blocked prior `needs_validation` record with the same fingerprint only after current source supports its trace. Link it to a current `planned` unit with `prior_status: "prior_needs_validation"`; the record keeps the unresolved blocker. The Phase 3 verifier that re-checks the carried record becomes that unit's assignment owner; its re-check is the unit's first check and moves the unit to `candidate` with the carried fingerprint. Include the record in final verification.
-- Treat prior rejected records as stale claims unless current evidence changes the failed trace or missing condition. An unchanged rejection suppresses only that exact claim, not review of the coverage unit.
-- Record missing or incompatible ledgers instead of treating them as empty coverage.
+## 過去の監査結果の取り込み
 
-State paths and source refs used in `run-metadata.json`. Summarize only the coverage consequences in `architecture.md`.
+作業選択前に、同じ repo の利用可能な全 `coverage-ledger.json` と `findings.json` を読みます。
 
-## Architecture summary and companion selection
+- 各記録・単位のソース位置、制御、条件、ソース由来 ID を現在と比較します。
+- 同じソース・条件・適格な証拠が有効な過去の `confirmed` だけを、同じ fingerprint で今回の候補へ引き継ぎます。`prior_status: "prior_confirmed_same_source"` の今回の `planned` 単位へ結び、同じ根本原因だけ探索除外にします。第3段階の再検証担当が割当所有者となり、その最初の再確認で単位を fingerprint 付き `candidate` にします。
+- 関連ソース・条件が変われば `prior_confirmed_changed_source` の再検証単位を計画します。探索除外せず、過去判定を前提にしません。
+- 過去の `needs_validation`、`deferred`、`blocked`、`out_of_scope`、変更済みソースを今回の作業にします。優先度の参考にはなりますが重複除外・抑制のキーにはなりません。
+- 未解決の過去 `needs_validation` は現ソースで経路を確認した後だけ同じ fingerprint で引き継ぎます。`prior_status: "prior_needs_validation"` の `planned` 単位へ結び、阻害要因を保持します。第3段階の担当が所有者・最初の検査を担い、fingerprint 付き `candidate` へ移し、最終検証にも含めます。
+- 過去の棄却は、失敗した経路や欠けた条件を変える新証拠がない限り古い主張です。同じ棄却で除外するのはその主張だけで、調査単位全体ではありません。
+- 台帳の欠落・非互換を記録し、調査範囲が空だったとは扱いません。
 
-The parent synthesizes `<output-dir>/architecture.md`, with a hard cap of about 1,000 words. Include:
+利用したパスと source ref を `run-metadata.json` に記録し、`architecture.md` には調査範囲への影響だけをまとめます。
 
-1. Product, principals, normal authority, and protected resources.
-2. The comparable-software baseline from Agent 1a, when one is source-grounded: what security trade-offs the comparable accepts. Use it to calibrate effort and severity, never to dismiss a demonstrated finding; if the comparable shares a defect pattern that has mattered in practice, that strengthens the finding. Omit this line when no meaningful comparable exists.
-3. Tech stack, source-visible deployment paths, and offline build/test limits.
-4. Entry surfaces and the important source-to-sink or lifecycle paths.
-5. Trust boundaries and the strongest source-visible control on each.
-6. Repository-relative starting paths.
-7. Prior coverage gaps, changed-source and blocked revalidation targets, and same-source confirmed exclusions.
-8. A short companion-selection summary derived from [ATTACK-CLASSES.md](ATTACK-CLASSES.md): selected files and the source-visible boundaries that require them.
+## アーキテクチャ要約・補足ガイドの選択
 
-Keep the assignment-level ordinary block, selected companion blocks, and excluded blocks with reasons in each ledger unit, not in `architecture.md`. This keeps the architecture cap valid for large runs and makes the exact hunter prompt map machine-checkable.
+親は `<output-dir>/architecture.md` を約1,000語以内にまとめます。
 
-Do not select a companion file merely because the language or dependency name appears. Select it because reconnaissance found the trust-sensitive boundary described by its `When to use this file` section. Do not exclude a visible boundary just because another agent will review a related class.
+1. 製品、主体、通常権限、保護資源。
+2. 担当 1a が根拠を示した類似製品がある場合、その製品が許容する安全上のトレードオフ。工数・深刻度の調整に使い、実証した指摘を却下する理由にはしません。実際に問題となった同型欠陥があれば裏付けを強めます。有用な比較対象がなければ省略します。
+3. 技術構成、見える配備経路、オフライン build/test 制約。
+4. 入口と主要な入力→処理先・ライフサイクル経路。
+5. 各信頼境界とソースで見える最も強い制御。
+6. 調査開始用のリポジトリ相対パス。
+7. 過去の不足、変更・阻害された再検証、同一ソースの確認済み除外。
+8. [ATTACK-CLASSES.md](ATTACK-CLASSES.md) に基づく選択ガイドと、それが必要なソース上の境界。
 
-## Deterministic coverage ledger
+担当ごとの通常分類、補足ブロック、理由付き除外は `architecture.md` ではなく各台帳単位に記録します。要約の長さを保ち、プロンプトへの割当を機械検査可能にするためです。
 
-The parent writes `<output-dir>/coverage-ledger.json` as a top-level JSON array. Derive one unit for every material combination of entry surface, trust boundary, subsystem, and applicable ordinary or companion attack class at the granularity the run profile sets (`quick` uses one all-in-scope subsystem identity; `deep` adds lifecycle modes). For a scoped run, seed in-scope surfaces for assignment and retain discovered excluded surfaces as `out_of_scope` units so later full runs can turn them into current work.
+言語・依存名があるだけで補足ガイドを選びません。「このファイルを使う場面」に該当する信頼境界を見つけたことが理由になります。関連分類を別担当が見るからといって、可視の境界を除外しません。
 
-Each dimension has a human label and a stable source-derived value in `canonical_refs`. Use the same canonical reference for the same source object across runs even if its display label changes. Suitable references include a repository-relative entry path plus exported scope, a route or message identity defined in source, the source control that defines a boundary, a repository package path, and the exact attack-class block reference. A block reference is `FILE.md#` plus the exact class name as written in bold or as a heading in that file — a stable identifier matched against the file text, not a rendered HTML anchor. For companion section blocks, use the heading text before any parenthetical qualifier (for example `Core discipline`). Do not derive references by lowercasing or slugging display labels.
+## 再現可能な調査台帳
 
-Derive `coverage_id` without lossy slugs:
+`<output-dir>/coverage-ledger.json` はトップレベルが JSON 配列です。入口 × 信頼境界 × サブシステム × 通常／補足分類の重要な組ごとに単位を作ります。粒度は profile に従い、`quick` は範囲内全体を1サブシステムに、`deep` はライフサイクルも分けます。部分監査では範囲内を割り当て、見つけた範囲外も `out_of_scope` で残して将来の作業に使います。
 
-1. Require every reference to be Unicode NFC with valid scalar values, visible content, no control, format, line/paragraph separator, or default-ignorable code point, and no surrounding whitespace.
-2. Encode its UTF-8 bytes with RFC 3986 percent encoding: leave only `A-Z a-z 0-9 - . _ ~` unescaped and use uppercase `%HH` for every other byte.
-3. Join encoded `surface`, `boundary`, `subsystem`, and `attack_class` references with `::`; append encoded `lifecycle` when present.
+各軸には表示ラベルと、`canonical_refs` の安定したソース由来値を付けます。表示が変わっても同じ対象には同じ参照を使います。入口相対パス＋公開スコープ、ソース定義の route/message、境界を定義する制御、package パス、正確な攻撃分類ブロックなどです。ブロック参照は `FILE.md#` と、太字または見出しの正確な分類名をつなぎます。HTML アンカーではありません。補足の共通節は括弧注記より前の見出し（例：`Core discipline`）を使います。表示名の小文字化・slug 化で作らないでください。日本語版でも参照用の英語名を保持します。
 
-Use the fixed canonical value `profile/quick/all-in-scope-subsystems` for the quick profile's coarsened subsystem dimension. Do not include wave number, agent, verdict, severity, or line number in a reference or ID. Sort units lexicographically by `coverage_id` before each assignment. Fail on every duplicate ID. If duplicate IDs have different semantic fields, treat that as a canonical identity collision; never merge or silently overwrite them. The validator also rejects one semantic tuple represented by different canonical references.
+情報を落とす slug を使わず `coverage_id` を生成します。
 
-Each unit records:
+1. 各参照は正しい Unicode scalar の NFC とし、可視文字を含め、前後空白、制御・format・行／段落区切り・default-ignorable 文字を禁止します。
+2. UTF-8 バイトを RFC 3986 の percent encoding にし、`A-Z a-z 0-9 - . _ ~` だけを残し、それ以外を大文字 `%HH` にします。
+3. 符号化した `surface`、`boundary`、`subsystem`、`attack_class` を `::` で連結し、あれば `lifecycle` も追加します。
+
+quick の subsystem は固定値 `profile/quick/all-in-scope-subsystems` です。参照・ID に wave、agent、verdict、severity、行番号を含めません。割当前に `coverage_id` の辞書順で整列し、重複 ID は必ずエラーにします。同じ ID で意味が違えば正規 ID 衝突であり、統合・黙った上書きは禁止です。同じ意味の組を異なる正規参照で表す場合も検証器が拒否します。
+
+各単位の形式：
 
 ```json
 {
@@ -132,25 +132,31 @@ Each unit records:
 }
 ```
 
-When `lifecycle` is material, add both `canonical_refs.lifecycle` and a human `lifecycle` field. `ordinary_attack_class_block` is null only when no ordinary block applies. The selected companion list includes each applicable class plus its companion `Core discipline`, `Universal moves`, and `Validation rules`; `excluded_blocks` records every considered but unselected block and the source fact that excludes it.
+ライフサイクルが重要なら `canonical_refs.lifecycle` と表示用 `lifecycle` を両方加えます。通常分類がない場合だけ `ordinary_attack_class_block` を null にします。補足リストには適用分類と各ガイドの `Core discipline`、`Universal moves`、`Validation rules` を含めます。検討した未選択ブロックはすべて、除外を裏付けるソース事実と共に `excluded_blocks` へ記録します。
 
-The parent may add bookkeeping fields but keeps the semantic fields above stable. In `prior_status`, `new` marks a surface first seen in this run when compatible prior ledgers exist; `none` marks a unit seeded when no compatible prior ledger is available. Prior `deferred`, `blocked`, `out_of_scope`, and changed-source units initialize as current `planned` work when now in scope. A prior same-source covered unit remains visible in the current ledger; assign changed source, important lifecycle paths, and exact conflicts first, then use the coverage critic to decide whether it needs another pass.
+管理項目は追加できますが、上の意味を持つ項目は安定させます。互換台帳があるとき初出の入口は `prior_status: "new"`、互換台帳なしなら `none` です。過去の延期・阻害・範囲外・変更済み単位が今は範囲内なら `planned` にします。同一ソースの調査済みも今回の台帳に残し、変更箇所、重要な状態遷移、明確な矛盾を先に割り当て、再確認の要否を網羅性レビューで判断します。
 
-`attempts` is an append-only archive for evidence-bearing assignments that a coverage critic reopens. Before reassignment, append the prior unit's exact `wave`, `status`, `agent_id`, `reviewed_paths`, `local_checks`, `result_fingerprints`, and `unresolved`, plus the critic's source-backed `reassignment_reason`. Only `blocked`, `covered`, and `candidate` states can be archived. Archived attempts retain the same state and evidence invariants as live units, use strictly increasing waves below the current wave, and retain their producing owners and artifacts. The next assignment increments `wave`, uses a fresh owner, and starts with empty live evidence. If the profile or budget prevents another assignment, increment `wave` and use live `deferred` state with null owner, empty evidence, and the stop reason. Never copy an archived owner's checks or artifacts into the live state. A later live terminal state contains only the new attempt's evidence; the archive remains unchanged.
+`attempts` は網羅性レビューが再開した証拠付き割当の追記専用履歴です。再割当前に、元の `wave`、`status`、`agent_id`、`reviewed_paths`、`local_checks`、`result_fingerprints`、`unresolved` と、根拠付き `reassignment_reason` をそのまま保存します。履歴にできる状態は `blocked`、`covered`、`candidate` のみです。現行と同じ状態・証拠条件を保ち、wave は現在未満で厳密に増加し、所有者・成果物を保持します。次の割当は wave を増やし、新しい所有者と空の現行証拠で開始します。profile・予算で再割当できなければ wave を増やして、所有者 null、証拠空、停止理由付きの現行 `deferred` にします。過去所有者の証拠を現行へコピーせず、新しい最終状態は新証拠だけを含め、履歴は変更しません。
 
-Enforce this state table exactly:
+次の状態表を厳守します。
 
-| Status | Unit `agent_id` | `reviewed_paths` / `local_checks` | `result_fingerprints` | `unresolved` |
+| 状態 | 単位の `agent_id` | `reviewed_paths` / `local_checks` | `result_fingerprints` | `unresolved` |
 |---|---|---|---|---|
-| `planned` | null | empty | empty | empty |
-| `not_applicable`, `out_of_scope`, `deferred` | null | empty | empty | nonempty reason |
-| `in_progress` | canonical owner | empty | empty | empty |
-| `blocked` | canonical owner | both nonempty owned partial evidence | empty | nonempty blocker |
-| `covered` | canonical owner | both nonempty | empty | empty |
-| `candidate` | canonical owner | both nonempty | nonempty | optional |
+| `planned` | null | 空 | 空 | 空 |
+| `not_applicable`, `out_of_scope`, `deferred` | null | 空 | 空 | 空でない理由 |
+| `in_progress` | 正規 ID の所有者 | 空 | 空 | 空 |
+| `blocked` | 正規 ID の所有者 | 両方に所有者付き部分証拠 | 空 | 空でない阻害要因 |
+| `covered` | 正規 ID の所有者 | 両方が空でない | 空 | 空 |
+| `candidate` | 正規 ID の所有者 | 両方が空でない | 空でない | 任意 |
 
-Canonical agent IDs match `^[a-z0-9][a-z0-9_-]{0,63}$` and are not Windows device names. Lowercase is mandatory, so one ledger cannot contain case-fold aliases. The unit `agent_id` records the assignment owner. Every check records its own `agent_id` and nonempty `reviewed_paths`; the unit-level `reviewed_paths` is exactly their union. A source-only check uses `artifact: null`. A local check requires a regular file promoted only by trusted parent-side code under exactly `agents/<check.agent_id>/artifacts/`. This lets hunter and verifier checks coexist in one unit. Scratch paths, output-root files, symlinks, special files, and another check owner's artifacts are not evidence.
+agent ID は `^[a-z0-9][a-z0-9_-]{0,63}$` に一致し、Windows device 名は禁止です。小文字必須で、大文字小文字だけ違う別名を認めません。単位の `agent_id` は割当所有者です。各検査も固有の `agent_id` と空でない `reviewed_paths` を持ち、単位のパスはその厳密な和集合にします。source-only は `artifact: null`。local は信頼する親側が `agents/<check.agent_id>/artifacts/` 直下の部分木へ昇格した通常ファイルが必要です。これにより探索・検証担当の証拠が共存できます。scratch、出力根のファイル、link、特殊ファイル、別検査所有者の成果物は証拠ではありません。
 
-The ledger is the coverage claim. An architecture summary, agent count, or generic "auth reviewed" sentence is not coverage evidence. Phase 2 closes units only from the paths and checks in a hunter's structured result.
+台帳が調査範囲の主張です。要約、担当数、一般的な「認証を確認済み」という文は証拠になりません。第2段階で単位を閉じる根拠は、担当の構造化結果のパスと検査だけです。
 
-Run `node <skill-dir>/validate-coverage-ledger.cjs <output-dir>/coverage-ledger.json` after seeding, after every parent update, and before Phase 6. The validator rejects input beyond 5 MiB, 64 nesting levels, 10,000 units, 1,000 entries in a nested collection, or 500,000 traversed values, and caps reported validation errors at 100. In practice the 5 MiB byte limit holds roughly 2,000-5,000 realistic units, so it binds before the 10,000-unit cap. Fix every error before assigning work or making a coverage claim.
+初期作成後、親の全更新後、第6段階の前に次を実行します。
+
+```sh
+node <skill-dir>/validate-coverage-ledger.cjs <output-dir>/coverage-ledger.json
+```
+
+上限は 5 MiB、入れ子64段、10,000単位、入れ子コレクション各1,000要素、走査値500,000件です。エラー表示は100件までです。実用的な単位では 5 MiB に約2,000〜5,000件しか入らず、件数より先に容量上限へ届きます。割当・調査範囲の主張の前に全エラーを直します。

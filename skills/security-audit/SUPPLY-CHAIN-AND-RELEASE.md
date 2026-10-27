@@ -1,73 +1,73 @@
-# Supply Chain and Release Hunting
+# サプライチェーン・リリースの脆弱性探索
 
-#### When to use this file
+#### このファイルを使う場面
 
-Reach for this file when the target resolves dependencies, builds from untrusted contributions, runs CI, creates release artifacts, signs or promotes builds, loads plugins, or updates deployed software. This domain covers trust handoffs from source and dependency to the artifact a user runs. Use `MEMORY-SAFETY-AND-BINARY.md` for flaws inside a local binary loader and `CLOUD-AND-DEPLOYMENT.md` for runtime workload authority.
+依存解決、非信頼の貢献からのビルド、CI、リリース成果物、署名・昇格、プラグイン、配備済みソフトウェアの更新に使います。ソース・依存から利用者が動かす成果物までの信頼の受け渡しを扱います。ローカルローダーの内部欠陥は `MEMORY-SAFETY-AND-BINARY.md`、実行時権限は `CLOUD-AND-DEPLOYMENT.md` を使います。
 
-Split large targets into dependency resolution, CI isolation, artifact provenance, release authorization, and updater/plugin trust.
+大きな対象は依存解決、CI 隔離、成果物の来歴、リリース認可、更新／プラグインに分けます。
 
-## Core discipline (include in every agent prompt for this domain)
+## Core discipline（基本原則：この分野の各エージェントへのプロンプトに含める）
 
+```text
+- 可変・既知脆弱な依存だけでは指摘にしない。解決へ影響する主体、利用ビルド、その後の実行・公開境界を示す。
+- ソース ID、解決済み入力、ビルドワーカー、成果物 ID、テスト結果、署名・証明、昇格、更新の利用先まで完全性を追う。
+- CI 設定は認可コードである。発火イベント、実行するコードの所有者、秘密・トークン、公開・変更権限を確定する。
+- 成果物と同じ非信頼の場所から取得する checksum は独立した完全性を保証しない。信頼の根と失敗時の挙動を特定する。
+- リポジトリ内の制御フローの破綻と限定したローカル検証は `confirmed`、観測できないブランチ保護、hosted runner、registry、署名サービス、本番昇格は `needs_validation` にする。
 ```
-- A mutable or known-vulnerable dependency is not a finding by itself. Show who can influence resolution, which build consumes it, and what execution or release boundary follows.
-- Follow integrity across every handoff: source identity, resolved inputs, build worker, artifact identity, test result, signature/attestation, promotion, and update consumer.
-- CI configuration is authorization code. Establish which event triggered a workflow, whose code runs, which secrets and tokens exist, and what it may publish or mutate.
-- A checksum fetched from the same untrusted location as the artifact does not establish independent integrity. Identify the trusted root and failure behavior.
-- Use `confirmed` for in-repo control-flow failures with bounded local validation. Use `needs_validation` for branch protection, hosted-runner, registry, signing-service, or production promotion facts that are not observable.
-```
 
-## Dependency and build-input attack classes (subagent_type: `general`)
+## 依存・ビルド入力の分類（subagent_type: `general`）
 
-**Dependency source and namespace confusion**
-Resolver configuration can select an unintended public/private namespace, fallback registry, mirror, repository, or source URL. Review package names, source priority, lockfile and checksum use, alternate build files, platform-specific resolution, and first-install versus update behavior.
+**Dependency source and namespace confusion**（依存元・名前空間の混同）
+意図しない公開／私有名前空間、代替 registry、mirror、repository、URL を解決しないか調べます。名前、優先度、lockfile、checksum、別ビルド定義、プラットフォーム差、初回と更新の違いを確認します。
 
-**Mutable and unbound build inputs**
-Builds consume branches, tags, unverified submodules, downloaded tools, generated assets, remote includes, floating CI actions, or container tags whose content can change without source review. Require a lower-trust writer and a path into trusted build output; reproducibility by itself does not prove authenticity.
+**Mutable and unbound build inputs**（可変・結び付けのないビルド入力）
+branch、tag、未検証 submodule、取得ツール、生成資源、remote include、可変 CI Action・コンテナ tag がレビューなしに変わらないか調べます。低信頼の書き手と信頼成果物への経路が必要です。再現可能性だけでは真正性を証明しません。
 
-**Generated-source and codegen provenance gaps**
-Schemas, vendored archives, generated clients, localization, documentation examples, or binary blobs produce executable or shipped content without the same review and integrity gate as source. Compare local regeneration with committed output and verify who controls input and generator.
+**Generated-source and codegen provenance gaps**（生成ソース・codegen の来歴不足）
+スキーマ、同梱アーカイブ、生成クライアント、翻訳、文書例、バイナリがソース同等のレビュー・完全性検査なしに実行・同梱内容を生まないか確認します。再生成とコミット済み出力を比較し、入力と生成器の管理者を調べます。
 
-**Build-context inclusion**
-Secrets, local configuration, repository metadata, test fixtures, or developer artifacts enter a package or image because the build context and ignore rules exceed intended release inputs. Confirm that the resulting artifact exposes a real credential, private data, or privileged configuration.
+**Build-context inclusion**（ビルドコンテキストへの混入）
+広すぎる対象・除外規則で、秘密、設定、リポジトリ情報、テスト、開発生成物が package／image に入らないか確認します。実際の資格、私的データ、特権設定の露出を確認します。
 
-## CI and automation attack classes (subagent_type: `general`)
+## CI・自動化の分類（subagent_type: `general`）
 
-**Untrusted code in a privileged workflow**
-A pull request, issue comment, fork, dependency update, or external event runs contributor-controlled code with protected secrets, write tokens, deployment authority, or a trusted runner. Compare trigger type, checkout ref, approval gate, environment protection, and permission narrowing. Do not assume repository-host defaults that are not in source.
+**Untrusted code in a privileged workflow**（特権ワークフローでの非信頼コード）
+PR、Issue コメント、fork、依存更新、外部イベントが保護された秘密、書込トークン、配備権限、信頼 runner で投稿者コードを動かさないか調べます。trigger、checkout ref、承認、環境保護、権限制限を比較し、ソース外のホスト既定値を仮定しません。
 
-**Workflow command and expression confusion**
-Attacker-controlled branch names, commit messages, issue fields, artifact names, matrix values, or generated output enter shell commands, template expressions, paths, or privileged workflow inputs without canonical validation.
+**Workflow command and expression confusion**（コマンド・式の混同）
+branch 名、commit メッセージ、Issue 項目、成果物名、matrix、生成出力が正規化検査なしにシェル、テンプレート式、パス、特権入力へ入らないか確認します。
 
-**Cache, artifact, and workspace trust mixing**
-A lower-trust job can populate a cache, artifact, shared workspace, or output that a higher-trust job later restores and executes or releases. Review cache keys and namespaces, artifact producer identity, digest binding, retention, and whether promotion re-resolves by mutable name.
+**Cache, artifact, and workspace trust mixing**（キャッシュ・成果物・作業領域の信頼混在）
+低信頼ジョブが書いた cache、artifact、workspace、output を高信頼ジョブが復元して実行・公開しないか確認します。キー、名前空間、作成者 ID、digest、保持、可変名での再解決を調べます。
 
-**Automation identity overreach**
-CI jobs receive permissions beyond the operation, repository, environment, or duration needed, and untrusted job inputs can select the affected resource. Missing least privilege alone is hardening; require a reachable privileged action.
+**Automation identity overreach**（自動化 ID の権限超過）
+必要な操作、repo、環境、期間以上の権限を、非信頼入力から選ぶ対象へ使えないか確認します。最小権限の欠如だけなら強化提案で、到達可能な特権操作が必要です。
 
-## Release and update attack classes (subagent_type: `general`)
+## リリース・更新の分類（subagent_type: `general`）
 
-**Build-to-promotion substitution**
-Tests, review, signature, and publication refer to mutable tags, filenames, channels, or artifact IDs rather than the same immutable digest. Check every copy, repack, architecture merge, and provenance step between build and release.
+**Build-to-promotion substitution**（ビルドから昇格までの入れ替え）
+テスト、レビュー、署名、公開が同じ不変 digest ではなく可変 tag、名前、channel、ID を参照しないか確認します。copy、再梱包、CPU 統合、来歴の全工程を追います。
 
-**Release authorization and signing-policy gaps**
-A release or signature is accepted from the wrong workflow, repository, branch, environment, key role, or threshold. Review identity claims inside attestations and verify the consumer validates them, not just a valid signature. Rotation, expiry, and revocation must fail closed where policy requires.
+**Release authorization and signing-policy gaps**（リリース認可・署名ポリシーの不足）
+違う workflow、repo、branch、環境、鍵役割、閾値の署名・release を受理しないか調べます。証明内の ID 主張を利用先が検証するか確認します。有効な署名だけでは不十分です。ローテーション、期限、失効はポリシー上必要なら拒否側に動く必要があります。
 
-**Update metadata and rollback confusion**
-An updater authenticates payload bytes but not version, product, platform, channel, target path, expiry, or rollback state, or it accepts metadata and payload from different authorized transactions. Verify atomic installation and recovery behavior. A signature API call without policy binding is incomplete.
+**Update metadata and rollback confusion**（更新メタデータ・巻き戻しの混同）
+バイトだけ認証して版、製品、平台、channel、宛先、期限、rollback 状態を結び付けない、または別取引の metadata と payload を組み合わせないか確認します。原子的な設置と回復を調べます。ポリシーとの結び付けのない署名 API 呼出しだけでは不完全です。
 
-**Plugin and extension trust expansion**
-An extension package gains host authority beyond its declared scope, a lower-trust publisher can replace another publisher's identity, or install/update hooks run before authenticity and capability checks. Intended installation of arbitrary same-user plugins is not a privilege boundary.
+**Plugin and extension trust expansion**（プラグイン・拡張の信頼拡大）
+申告範囲を超えるホスト権限、他の発行者への成り済まし、真正性・機能検査前の install/update hook を調べます。意図的に同じユーザーの任意プラグインを入れること自体は特権境界ではありません。
 
-## Universal moves (apply across the above)
+## Universal moves（共通の調べ方）
 
-- Walk backward from a released digest or installed update to every source, generated input, credential, worker, cache, test result, and authorization decision.
-- Compare untrusted and protected workflow events side by side. Mark each persisted channel crossing between them and require an immutable identity plus producer trust.
-- Review revoked key, failed download, missing attestation, partial platform release, rollback, and registry outage paths. The failure policy is part of release integrity.
+- 公開 digest・導入更新から逆に、ソース、生成入力、資格、worker、cache、テスト、認可をすべて追います。
+- 非信頼イベントと保護イベントを比較し、永続チャネルの越境に不変 ID と作成者の信頼性を要求します。
+- 失効鍵、取得失敗、証明欠落、平台の部分リリース、rollback、registry 障害を調べます。失敗時ポリシーも完全性の一部です。
 
-## Validation rules (apply before reporting ANY finding here)
+## Validation rules（検証ルール：報告前にすべて適用）
 
-1. Name the lower-trust actor, controllable source/cache/artifact/metadata, consuming trusted job or updater, and resulting unauthorized publication, code inclusion, secret disclosure, or privileged execution.
-2. Prove artifact identity across the broken handoff. A different mutable name or unbound digest must reach a real consumer.
-3. Verify built-in package-manager, repository-host, registry, and signing defaults for the pinned version. Unknown hosted controls require `needs_validation`.
-4. Keep local validation bounded: use a harmless fixture repository, dummy credential marker, local registry/config, and non-production artifact namespace. Do not publish or alter a real release.
-5. Return `confirmed` only with a complete source-visible handoff and meaningful result. Return `needs_validation` with the precise branch, runner, registry, signing, or deployment fact an owner must observe.
+1. 低信頼主体、操作可能な source/cache/artifact/metadata、信頼ジョブ・updater、未許可公開・混入・漏えい・特権実行を示します。
+2. 壊れた受け渡しの成果物 ID を証明します。異なる可変名・未固定 digest が実際の利用先へ届く必要があります。
+3. 固定版の package manager、repo host、registry、署名の既定値を確認します。不明な hosted 制御は `needs_validation` です。
+4. 無害な fixture repo、ダミー資格マーカー、ローカル registry／設定、本番以外の名前空間で限定検証します。本物の release を公開・変更しません。
+5. 完全なソース上の受け渡しと意味ある結果だけを `confirmed` にします。`needs_validation` は所有者が観測すべき branch、runner、registry、署名、配備の事実を示します。

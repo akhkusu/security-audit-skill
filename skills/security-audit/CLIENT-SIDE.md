@@ -1,83 +1,83 @@
-# Client-Side and Browser Hunting
+# クライアント側・ブラウザーの脆弱性探索
 
-#### When to use this file
+#### このファイルを使う場面
 
-Reach for this file when meaningful trust decisions or untrusted rendering happen in a browser: single-page apps, browser extensions, embedded webviews, service workers, offline applications, and code that renders attacker-influenceable content into the DOM, receives cross-window messages, or uses browser storage. These paths include sources the server never sees, such as URL fragments, `window.name`, `postMessage`, and previously cached content.
+SPA、ブラウザー拡張、組み込み WebView、Service Worker、オフラインアプリなど、ブラウザーで重要な信頼判断や非信頼内容の表示を行う場合に使います。攻撃者が影響できる DOM、ウィンドウ間メッセージ、ストレージを確認します。URL フラグメント、`window.name`、`postMessage`、過去のキャッシュなど、サーバーに届かない入力も含みます。
 
-Use alongside `ATTACK-CLASSES.md`. This file covers browser sources and sinks, origin boundaries, browser persistence, and cross-site state oracles. Use `DESKTOP-MOBILE-AND-LOCAL-IPC.md` for the native side of a webview bridge, and `WEB-PROTOCOL-AND-AUTH.md` for server-side CSRF, sessions, and auth callbacks.
+`ATTACK-CLASSES.md` と併用します。本書はブラウザーの入力元・処理先、origin 境界、永続化、サイト間の状態推測を扱います。WebView ブリッジのネイティブ側は `DESKTOP-MOBILE-AND-LOCAL-IPC.md`、サーバーの CSRF・セッション・認証コールバックは `WEB-PROTOCOL-AND-AUTH.md` を使います。
 
-## Core discipline (include in every agent prompt for this domain)
+## Core discipline（基本原則：この分野の各エージェントへのプロンプトに含める）
 
+```text
+- 操作可能な入力元と、実行または漏えいを起こす処理先を特定し、攻撃者のデータが届くことを示す。
+- 被害者のセッション、別 origin、共有の永続状態への影響が必要。自分だけへの注入や自分のデータの開示は指摘にしない。
+- フレームワークのエスケープ、同一 origin ポリシー、CSP、COOP/CORP、Service Worker の範囲、現在の noopener の既定動作を実際の防御として確認する。
+- ストレージとキャッシュは origin 単位で共有され、ログイン後も残り得る。書き手、読み手、アカウント・テナント・ワーカーのどの遷移で消すかを特定する。
+- 完全なソース証拠と限定的なローカルブラウザーテストがある場合だけ `confirmed` にする。レンダラー、拡張権限、デプロイ済みヘッダー、ブラウザーポリシーが不明なら `needs_validation` にする。
 ```
-- A client-side candidate needs a controllable source and an executing or disclosing sink. Name both and show attacker-influenced data reaching the sink.
-- The impact must reach a victim's session, another origin, or shared persistence. Self-injection and disclosure of the attacker's own data are not findings.
-- Framework escaping, browser same-origin policy, CSP, COOP/CORP, service-worker scope, and modern noopener defaults are real controls. Verify them before assigning impact.
-- Browser storage and caches are shared by origin and may outlive login state. Identify who writes, who reads, and which account, tenant, or worker lifecycle clears each record.
-- Use `confirmed` only for complete source evidence plus bounded local browser tests. Use `needs_validation` when renderer, extension permission, deployed header, or browser-policy behavior is required but unavailable.
-```
 
-## DOM and object-state attack classes (subagent_type: `general`)
+## DOM・オブジェクト状態の攻撃分類（subagent_type: `general`）
 
-**DOM-based XSS**
-Trace `location` fields, `document.referrer`, `window.name`, message data, storage, and browser-controlled document state into `innerHTML`, `outerHTML`, `document.write`, string-evaluating APIs, executable URLs, jQuery HTML APIs, or framework escape hatches. Interpolation escaped by the framework is not a finding.
+**DOM-based XSS**（DOM ベース XSS）
+`location`、`document.referrer`、`window.name`、メッセージ、ストレージ、ブラウザー内の文書状態から、`innerHTML`、`outerHTML`、`document.write`、文字列評価 API、実行可能 URL、jQuery HTML API、フレームワークのエスケープ回避機能へ追います。フレームワークがエスケープする埋め込みは指摘にしません。
 
-**DOM clobbering**
-Attacker-injected `id` or `name` attributes shadow a global, form property, configuration object, or initialization flag later trusted by code. Require both a markup path that preserves the attribute and a security-relevant use of the clobbered value.
+**DOM clobbering**（DOM clobbering（DOM の名前衝突））
+攻撃者が注入した `id` や `name` が、後で信頼されるグローバル変数、フォーム属性、設定、初期化フラグを隠さないか調べます。属性が保持されるマークアップ経路と、上書きされた値のセキュリティ上重要な利用の両方が必要です。
 
-**Prototype pollution and gadget chain**
-An attacker-controlled key reaches a recursive write such as deep merge or path assignment and modifies prototype state. Then a reachable gadget consumes the polluted property to change authorization, execution, navigation, or rendering. `JSON.parse`, a shallow copy, or pollution without a gadget is not enough.
+**Prototype pollution and gadget chain**（プロトタイプ汚染とガジェットの連鎖）
+攻撃者のキーが deep merge やパス代入などの再帰書き込みでプロトタイプを変更し、その値を使う到達可能な処理が認可、実行、移動、表示を変えるか確認します。`JSON.parse`、浅いコピー、利用先のない汚染だけでは不十分です。
 
-## Cross-origin messaging and network attack classes (subagent_type: `general`)
+## origin 間通信・ネットワークの攻撃分類（subagent_type: `general`）
 
-**`postMessage` origin and source trust**
-A handler performs a sensitive action with `event.data` without an exact origin allowlist and, where multiple frames share an origin, the expected `event.source`. On the send side, sensitive data sent to `*` reaches an unintended embedder. Weak substring, prefix, suffix, or unanchored-regex origin matching is not an origin check.
+**`postMessage` origin and source trust**（`postMessage` の origin・送信元の信頼）
+厳密な origin 許可リストや、同一 origin の複数フレームでは期待する `event.source` を確認せず、`event.data` で機密操作をしないか確認します。送信先 `*` による想定外の埋め込み側への漏えいも調べます。部分一致、前方・後方一致、境界なしの正規表現は origin 検査になりません。
 
-**Cross-site WebSocket request use**
-A WebSocket upgrade accepts ambient cookies from an untrusted origin without an `Origin` check or channel-specific token, allowing the victim's session to read or mutate data. Confirm both the upgrade behavior and a security-relevant message handler.
+**Cross-site WebSocket request use**（サイトをまたぐ WebSocket の利用）
+`Origin` 検査やチャネル専用トークンなしに、信頼できない origin から被害者の Cookie を伴う接続を受け入れ、データを読み書きできないか確認します。接続アップグレードと重要なメッセージハンドラーを両方検証します。
 
-**Credentialed CORS trust**
-The server reflects or weakly matches `Origin` while allowing credentials and returns sensitive responses. A bare wildcard with credentials is rejected by browsers; report only the actual reflected/allowed origin path and cross-origin data or mutation.
+**Credentialed CORS trust**（認証情報を伴う CORS の信頼）
+`Origin` を反射・弱く照合し、認証情報付きで機密応答を返さないか確認します。単なるワイルドカードと認証情報の併用はブラウザーが拒否するため、実際に許可・反射される origin とデータ漏えい・変更だけを報告します。
 
-## Service-worker and browser-storage attack classes (subagent_type: `general`)
+## Service Worker・ストレージの攻撃分類（subagent_type: `general`）
 
-**Service-worker registration and scope takeover**
-Attacker-influenceable content can become the registered worker script, control a path that receives an over-broad `Service-Worker-Allowed` scope, or alter update imports without integrity control. Verify the final script URL, response MIME type, origin, scope, and who controls every imported script. A normal same-origin worker with intended scope is not a defect.
+**Service-worker registration and scope takeover**（Service Worker の登録・範囲の乗っ取り）
+攻撃者の内容がワーカースクリプト、過剰な `Service-Worker-Allowed` の対象パス、完全性検証のない更新用 import にならないか確認します。最終 URL、応答 MIME、origin、範囲、全 import の管理者を確認します。意図した範囲の同一 origin ワーカーは欠陥ではありません。
 
-**Service-worker cache and identity confusion**
-The worker caches personalized responses without including account, tenant, authorization state, or request mode in its policy, then serves them after account switch or logout. Review fetch-event routing, cache names and keys, navigation fallbacks, cache cleanup, and whether error/offline paths return another user's prior response.
+**Service-worker cache and identity confusion**（Service Worker のキャッシュ・ID 混同）
+アカウント、テナント、認可状態、要求モードを考慮せず個別応答を保存し、ログアウトや切り替え後に返さないか確認します。fetch の振り分け、キャッシュ名・キー、ナビゲーション代替、削除処理、エラー・オフライン時の他人の応答を調べます。
 
-**Browser-storage disclosure and stale authorization**
-Tokens, private responses, draft data, or authorization decisions remain in `localStorage`, `sessionStorage`, IndexedDB, Cache Storage, extension storage, or client state and become readable by another account or less-trusted same-origin component. Storage of a token alone is not a finding; require a realistic reader with less authority, or continued use after revocation/logout.
+**Browser-storage disclosure and stale authorization**（ストレージの漏えい・古い認可）
+`localStorage`、`sessionStorage`、IndexedDB、Cache Storage、拡張ストレージ、クライアント状態にトークン、私的応答、下書き、認可判断が残り、別アカウントや低信頼の同一 origin 部品に読まれないか確認します。トークンの保存だけでは不十分で、現実的な低権限の読み手、または失効・ログアウト後の継続利用が必要です。
 
-**Cross-context storage and broadcast confusion**
-`storage` events, `BroadcastChannel`, shared workers, or origin-wide caches carry identity or commands between tabs without binding them to the current session. Check account switching, private/public windows, tenant changes, and stale tabs that can overwrite newer auth state.
+**Cross-context storage and broadcast confusion**（コンテキスト間のストレージ・配信の混同）
+`storage` イベント、`BroadcastChannel`、Shared Worker、origin 全体のキャッシュが現在のセッションに結び付かない ID・コマンドをタブ間で運ばないか確認します。アカウント、非公開／通常ウィンドウ、テナントの切り替え、古いタブによる新認証状態の上書きを調べます。
 
-## Cross-site information leak classes (subagent_type: `general`)
+## サイト間の情報漏えい分類（subagent_type: `general`）
 
-**XS-Leaks and cross-origin state oracles**
-An attacker page can distinguish protected cross-origin state through resource load/error events, frame or window state, redirect behavior, timing, cache state, or response size while the browser attaches victim credentials. Require one concrete secret-bearing predicate such as whether a private object, role, or account exists. Generic timing variance or public-resource availability is not a finding.
+**XS-Leaks and cross-origin state oracles**（XS-Leaks・origin 間の状態推測）
+被害者の認証情報が送られるとき、読込／エラー、フレーム・ウィンドウ状態、転送、時間、キャッシュ、応答サイズから保護状態を区別できないか調べます。私的オブジェクト、役割、アカウントの存在など、機密を表す具体的な条件が必要です。一般的な時間のばらつきや公開リソースの可用性は指摘にしません。
 
-**Window and opener state disclosure**
-A cross-origin window's permitted metadata or navigation result reveals protected state, or a retained opener/named-window relationship lets an attacker-controlled page influence a privileged navigation. Check COOP, frame protections, `noopener`, exact origin, and whether the observable state is confidential.
+**Window and opener state disclosure**（ウィンドウ・opener の状態開示）
+別 origin ウィンドウの許可されたメタデータや移動結果が保護状態を漏らすか、残った opener／名前付きウィンドウが特権的な移動へ影響するかを確認します。COOP、フレーム保護、`noopener`、厳密な origin、状態の機密性を確認します。
 
-## UI-redress and navigation attack classes (subagent_type: `general`)
+## UI 偽装・移動の攻撃分類（subagent_type: `general`）
 
-**Clickjacking**
-A framed, state-changing action lacks effective `frame-ancestors`, `X-Frame-Options`, or equivalent UI isolation. Require the sensitive action and confirm it can complete in the framed state; missing headers on read-only content are hardening notes.
+**Clickjacking**（クリックジャッキング）
+状態変更を伴う画面で `frame-ancestors`、`X-Frame-Options` 相当の隔離が機能するか調べます。機密操作がフレーム内で完了できることが必要です。読み取り専用内容のヘッダー欠落は強化提案です。
 
-**Client-side navigation confusion**
-A client source controls redirect or navigation without scheme and destination policy, including executable `javascript:` or `data:` destinations. Reverse tabnabbing applies only where code explicitly keeps `window.opener`, uses `window.open` without isolation, or supports a browser without implicit `noopener`.
+**Client-side navigation confusion**（クライアント側の移動先の混同）
+スキーム・宛先ポリシーなしに入力が転送・移動を制御し、`javascript:` や `data:` へ進めないか確認します。逆タブナビングは `window.opener` を明示的に残す、隔離なしの `window.open`、暗黙の `noopener` がないブラウザーに限って検討します。
 
-## Universal moves (apply across the above)
+## Universal moves（共通の調べ方）
 
-- Start from DOM, navigation, worker, message, and storage sinks, then trace backward to browser-only and server-controlled sources. Record the browser policy that should stop the path.
-- Test account switch, logout, worker update, offline fallback, and stale-tab state with a local test origin and dummy accounts. Do not use production users, origins, or shared services.
-- For XS-Leaks, list only predicates proved by source and local browser behavior. Then identify the response headers or rendering choice that would remove the oracle.
+- DOM、移動、ワーカー、メッセージ、ストレージの処理先から逆に追い、ブラウザー専用入力とサーバー側入力を区別します。経路を止めるべきブラウザーポリシーを記録します。
+- ローカルのテスト origin とダミーアカウントで、切り替え、ログアウト、ワーカー更新、オフライン、古いタブを確認します。本番の利用者・origin・共有サービスは使いません。
+- XS-Leaks はソースとローカルブラウザーで証明した条件だけを列挙し、推測を防ぐ応答ヘッダーや表示方式を特定します。
 
-## Validation rules (apply before reporting ANY finding here)
+## Validation rules（検証ルール：報告前にすべて適用）
 
-1. Cite the source, sink, browser policy, affected origin/session, and observable mutation or disclosure.
-2. For prototype pollution, prove the recursive write and a security-relevant gadget. For DOM clobbering, prove the markup survives and the shadowed value is used.
-3. For service workers and storage, prove lifecycle reachability: an attacker-controlled write or cache entry must reach a different account, tenant, or later authorization state.
-4. For messaging, CORS, WebSocket, and XS-Leaks, show exact origin/source validation and the protected state or action exposed. Confirm that CSP, COOP/CORP, cookies, and SameSite policy do not already block it.
-5. Return `confirmed` findings only with a complete client path and bounded local evidence. Return `needs_validation` with the precise deployed header, extension permission, browser version, or renderer behavior an owner must verify.
+1. 入力元、処理先、ブラウザーポリシー、影響 origin／セッション、観測できる変更・漏えいを引用します。
+2. プロトタイプ汚染は再帰書き込みと重要な利用処理、DOM clobbering は残るマークアップと上書き値の使用を証明します。
+3. ワーカー・ストレージでは攻撃者の書き込みやキャッシュが別アカウント、テナント、後の認可状態に届くことを証明します。
+4. 通信、CORS、WebSocket、XS-Leaks は厳密な origin／送信元検査と露出する保護状態・操作を示します。CSP、COOP/CORP、Cookie、SameSite で既に止まらないか確認します。
+5. 完全なクライアント経路と限定的なローカル証拠があるものだけ `confirmed` にします。`needs_validation` には所有者が確認すべきヘッダー、拡張権限、ブラウザーバージョン、レンダラー挙動を具体的に書きます。
